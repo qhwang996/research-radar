@@ -10,7 +10,73 @@
 
 ---
 
-## 2. High-level Modules
+## 2. Technology Stack
+
+### 2.1 Core Technologies
+
+- **Language**: Python 3.10+
+- **Database**: SQLite (MVP阶段)
+- **ORM**: SQLAlchemy 2.0+
+- **Task Scheduling**: APScheduler
+- **LLM**: OpenAI API / Anthropic API
+- **Web Scraping**: requests + BeautifulSoup4
+- **Configuration**: python-dotenv + pydantic-settings
+- **Testing**: pytest
+- **Code Quality**: black (formatter) + ruff (linter)
+
+### 2.2 Key Dependencies
+
+```
+sqlalchemy>=2.0.0
+alembic>=1.12.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+apscheduler>=3.10.0
+openai>=1.0.0
+anthropic>=0.18.0
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+click>=8.1.0
+pytest>=7.4.0
+black>=23.0.0
+ruff>=0.1.0
+```
+
+---
+
+## 3. Directory Structure
+
+```
+research-radar/
+├── src/
+│   ├── models/          # 数据模型
+│   ├── crawlers/        # 爬虫
+│   ├── pipelines/       # 数据处理管道
+│   ├── scoring/         # 评分引擎
+│   ├── theme/           # 主题管理
+│   ├── direction/       # 方向管理
+│   ├── reporting/       # 报告生成
+│   ├── feedback/        # 反馈管理
+│   ├── evolution/       # 演化追踪(Phase 2)
+│   ├── llm/             # LLM服务
+│   ├── scheduler/       # 任务调度
+│   └── cli/             # CLI工具
+├── data/
+│   ├── raw/
+│   ├── processed/
+│   ├── reports/
+│   └── cache/
+├── tests/
+├── docs/
+└── schemas/
+```
+
+详细目录结构见 15_implementation_guide.md
+
+---
+
+## 4. High-level Modules
 
 ### 2.1 Ingestion
 
