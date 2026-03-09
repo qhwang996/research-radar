@@ -41,6 +41,46 @@
 
 ---
 
+### R2.1: CCS数据源结构不稳定
+
+**风险描述**：
+- ACM CCS 2025 官方 accepted papers 页面首屏 HTML 中列表为空，内容依赖前端运行时加载
+- ACM Digital Library proceedings 页面存在反爬虫检查，稳定性不足
+- 直接依赖单一页面结构会导致爬虫在无浏览器环境下失效
+
+**已观察到的问题（2026-03-09）**：
+- `https://www.sigsac.org/ccs/CCS2025/accepted-papers/` 返回的静态 HTML 中 `First Cycle` 和 `Second Cycle` 的 `<ul>` 为空
+- 用户提供的 ACM DL proceedings 链接存在反爬虫风险，不适合作为唯一抓取路径
+
+**缓解措施**：
+1. 官方页面作为第一抓取源，优先尝试静态解析
+2. 当官方页面没有静态论文列表时，回退到更稳定的结构化来源
+3. 当前实现已加入 DBLP fallback，保证 P1.1 阶段可以稳定获取 CCS 标题、作者和外链
+4. 后续如需更完整元数据，再评估浏览器渲染或官方 API 方案
+
+**当前状态**：已识别，已通过 fallback 缓解
+
+---
+
+### R2.2: 博客站点模板频繁漂移
+
+**风险描述**：
+- 博客首页常在不改 URL 的前提下更换卡片结构、标题层级和作者字段
+- 静态 parser 容易只对历史模板有效，真实线上页面可能返回 0 条结果
+
+**已观察到的问题（2026-03-09）**：
+- Google Project Zero 当前首页已不再稳定匹配旧 Blogger `post-outer` 结构
+- Cloudflare Security 标签页当前使用新的文章卡片链接模式，不再依赖 `/the-latest/`
+
+**缓解措施**：
+1. parser 尽量基于语义字段而不是单一 class 名
+2. 先做本地 parser 测试，再做线上 live fetch 验证
+3. 当前实现已扩展为兼容 Project Zero 和 Cloudflare 的现行页面结构
+
+**当前状态**：已识别，已通过 live validation 修复
+
+---
+
 ### R3: 数据质量问题
 
 **风险描述**：

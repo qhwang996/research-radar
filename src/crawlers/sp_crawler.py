@@ -1,98 +1,81 @@
-"""
-IEEE S&P (Oakland) Conference Paper Crawler
-"""
-import requests
+"""IEEE S&P conference paper crawler."""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+
 from bs4 import BeautifulSoup
-import json
-from datetime import datetime
-from pathlib import Path
+
+from src.crawlers.base import PaperCrawler, clean_text, split_authors
+
+logger = logging.getLogger(__name__)
 
 
-class SPCrawler:
-    def __init__(self, year=2026):
-        self.year = year
-        self.base_url = f"https://sp{year}.ieee-security.org/accepted-papers.html"
+class SPCrawler(PaperCrawler):
+    """Crawler for IEEE Symposium on Security and Privacy accepted papers."""
 
-    def fetch_papers(self):
-        """Fetch accepted papers from S&P"""
-        print(f"Fetching S&P {self.year} papers...")
+    source_name = "IEEE S&P"
+    source_slug = "sp"
 
-        response = requests.get(self.base_url)
-        response.raise_for_status()
+    def build_year_url(self, year: int) -> str:
+        """Return the accepted papers URL for an IEEE S&P year."""
 
-        soup = BeautifulSoup(response.content, 'html.parser')
-        papers = []
+        return f"https://sp{year}.ieee-security.org/accepted-papers.html"
 
-        # Find all paper entries
-        paper_entries = soup.find_all('div', class_='list-group-item')
+    def fetch_papers(self, years: list[int]) -> list[dict[str, Any]]:
+        """Fetch accepted papers across one or more IEEE S&P years."""
 
-        for entry in paper_entries:
-            paper = self._parse_paper(entry)
-            if paper:
-                papers.append(paper)
-
-        print(f"Found {len(papers)} papers")
+        papers: list[dict[str, Any]] = []
+        for year in self.normalize_years(years):
+            year_url = self.build_year_url(year)
+            html = self.fetch_url(year_url)
+            year_papers = self.parse_year_page(html, year=year, source_url=year_url)
+            logger.info("Fetched %s IEEE S&P papers for %s", len(year_papers), year)
+            papers.extend(year_papers)
         return papers
 
-    def _parse_paper(self, entry):
-        """Parse a single paper entry"""
-        try:
-            # Extract title
-            title_link = entry.find('a', {'data-toggle': 'collapse'})
-            if not title_link:
-                return None
-            
-            title = title_link.get_text(strip=True)
-            # Remove the chevron icon text
-            title = title.replace('☰', '').strip()
-            
-            # Extract authors
-            authors = []
-            author_div = entry.find('div', class_='authorlist')
-            if author_div:
-                author_text = author_div.get_text(strip=True)
-                # Simple parsing - split by comma
-                authors = [a.strip() for a in author_text.split(',') if a.strip()]
-            
-            return {
-                'title': title,
-                'authors': authors,
-                'conference': f'IEEE S&P {self.year}',
-                'year': self.year,
-                'source_url': self.base_url
-            }
-        except Exception as e:
-            print(f"Error parsing paper: {e}")
-            return None
+    def parse_year_page(
+        self,
+        html: str,
+        *,
+        year: int,
+        source_url: str,
+    ) -> list[dict[str, Any]]:
+        """Parse an IEEE S&P accepted papers page into normalized records."""
 
-    def save_papers(self, papers, output_dir='data/raw/papers'):
-        """Save papers to JSON file"""
-        Path(output_dir).mkdir(parents=True, exist_ok=True)
-        
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f"{output_dir}/sp_{self.year}_{timestamp}.json"
-        
-        data = {
-            'source': 'IEEE S&P',
-            'year': self.year,
-            'fetched_at': datetime.now().isoformat(),
-            'url': self.base_url,
-            'total_papers': len(papers),
-            'papers': papers
-        }
-        
-        with open(filename, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-        
-        print(f"Saved to {filename}")
-        return filename
+        soup = BeautifulSoup(html, "html.parser")
+        papers: list[dict[str, Any]] = []
+        for entry in soup.select("div.list-group-item"):
+            title_node = entry.select_one("a[data-toggle='collapse']")
+            if not title_node:
+                continue
 
+            title = clean_text(title_node.get_text(" ", strip=True)).replace("☰", "").strip()
+            if not title:
+                continue
 
-def main():
-    crawler = SPCrawler(year=2026)
-    papers = crawler.fetch_papers()
-    crawler.save_papers(papers)
+            author_node = entry.select_one(".collapse.authorlist")
+            author_text = clean_text(author_node.get_text(" ", strip=True)) if author_node else ""
+            authors = split_authors(author_text)
 
+            cycle_node = entry.find_parent(class_="tab-pane")
+            cycle = cycle_node.get("id") if cycle_node else None
 
-if __name__ == '__main__':
-    main()
+            papers.append(
+                {
+                    "title": title,
+                    "authors": authors,
+                    "year": year,
+                    "conference": f"IEEE S&P {year}",
+                    "source_url": source_url,
+                    "paper_url": None,
+                    "abstract": None,
+                    "pdf_url": None,
+                    "cycle": cycle,
+                    "data_completeness": "with_authors" if authors else "title_only",
+                    "source_type": "papers",
+                }
+            )
+
+        return papers
