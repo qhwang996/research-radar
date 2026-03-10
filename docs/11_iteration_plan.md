@@ -49,25 +49,37 @@
 
 ## Priority 1: 数据采集（核心流程第一步）
 
-### P1.1 爬虫基类和整合
+### P1.1 爬虫基类和整合 ✅ 已完成（2026-03-09）
 **依赖**：无
 **核心功能**：
-- BaseCrawler接口定义
-- 四大顶会爬虫：NDSS ✅, S&P ✅, CCS, USENIX Security
-- 至少3个知名博客爬虫（如：Google Project Zero, Trail of Bits, Cloudflare Blog等）
-- 统一的数据保存格式（JSON）
-- 错误处理和日志
+- ✅ BaseCrawler接口定义（base.py, 262行）
+- ✅ 四大顶会爬虫：NDSS, S&P, CCS, USENIX Security
+- ✅ 3个博客爬虫：Cloudflare Blog, PortSwigger, Google Project Zero
+- ✅ 统一的数据保存格式（JSON）
+- ✅ 错误处理和日志（重试机制、session管理）
+- ✅ 爬虫注册机制（registry.py）
+- ✅ 单元测试（10 passed）
 
 **可选功能**：
-- arXiv爬虫（后续添加）
-- 更多博客源（后续添加）
+- ⏭️ arXiv爬虫（后续添加）
+- ⏭️ 更多博客源（后续添加）
 
 **验收标准**：
-- 能爬取四大顶会多年数据
-- 能爬取至少3个博客的最新文章
-- 数据保存为统一JSON格式
-- 有完整的错误处理和日志
-- 有单元测试
+- ✅ 能爬取四大顶会多年数据
+- ✅ 能爬取3个博客的最新文章
+- ✅ 数据保存为统一JSON格式
+- ✅ 有完整的错误处理和日志
+- ✅ 有单元测试
+
+**实现亮点**：
+- 完整的重试机制（Retry with backoff）
+- 统一的session管理和工具函数
+- 爬虫注册机制便于扩展
+- 向后兼容（v2版本变成别名）
+
+**已知问题**：
+- CCS数据源不稳定（已通过DBLP fallback缓解）
+- 博客模板可能漂移（已通过live validation修复）
 
 ---
 
@@ -317,3 +329,19 @@
 - P1.1 爬虫整合（需补充CCS, USENIX Security + 3个博客爬虫）
 
 **注意**：P1.1是必须完成的，不能跳过。系统需要完整的数据源支持。
+
+---
+
+## P1.1 完成总结（2026-03-09）
+
+**已实现**：
+- ✅ BaseCrawler基类和工具函数
+- ✅ 四大顶会爬虫完整实现
+- ✅ 3个博客爬虫完整实现
+- ✅ 爬虫注册机制
+- ✅ 测试全部通过（10 passed）
+
+**下一步**：
+- P2.1 Normalization Pipeline（将爬虫数据转换为Artifact）
+
+**注意**：P2.1依赖P0.1和P1.1，现在可以开始实现。
