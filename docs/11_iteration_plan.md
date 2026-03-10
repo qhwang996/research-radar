@@ -85,23 +85,34 @@
 
 ## Priority 2: 数据处理（核心流程第二步）
 
-### P2.1 Normalization Pipeline
+### P2.1 Normalization Pipeline ✅ 已完成（2026-03-10）
 **依赖**：P0.1, P1.1
 **核心功能**：
-- 读取raw JSON
-- 转换为Artifact对象
-- 生成canonical_id
-- 基础去重（基于title）
-- 保存到数据库
+- ✅ 读取 raw JSON（支持单文件、目录、递归扫描）
+- ✅ 兼容 legacy `papers/articles` 和 current `items` 格式
+- ✅ 转换为 Artifact 对象
+- ✅ 生成稳定 canonical_id（UUID5）
+- ✅ 基础去重（基于 title key + source context）
+- ✅ upsert 保存到数据库
+- ✅ 对现有 `data/raw/papers` 试跑成功
 
 **可选功能**：
 - 复杂去重算法
 - 数据验证
 
 **验收标准**：
-- 能处理爬虫输出
-- Artifact正确存入数据库
-- 去重有效
+- ✅ 能处理爬虫输出
+- ✅ Artifact 正确存入数据库
+- ✅ 去重有效
+
+**实现亮点**：
+- 支持历史 raw 数据重放，不需要迁移旧文件
+- 兼容论文和博客两类输入
+- 真实数据试跑完成：1499 条 raw 记录归一化后落成 1168 条 artifact
+- 全量测试通过（19 passed）
+
+**已知问题**：
+- 当前去重仍是 MVP 级别，主要依赖 title key，不包含复杂 alias mapping
 
 ### P2.2 LLM服务层
 **依赖**：无

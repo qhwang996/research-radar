@@ -81,6 +81,27 @@
 
 ---
 
+### R2.3: Raw JSON 历史格式不一致
+
+**风险描述**：
+- 早期爬虫输出与当前统一爬虫输出字段不一致
+- normalization 若只支持单一格式，会导致历史 raw 数据无法重放
+- 同一来源在不同阶段的 key 命名不同，容易造成 replay 失败或字段缺失
+
+**已观察到的问题（2026-03-10）**：
+- 历史 raw 文件使用 `papers` + `url` 结构
+- 当前统一爬虫输出使用 `items` + `source_type` 结构
+- 博客与论文的内容 URL 字段也不一致（`paper_url` / `article_url` / `source_url`）
+
+**缓解措施**：
+1. NormalizationPipeline 同时兼容 legacy 和 current 两种 payload 结构
+2. 优先提取内容级 URL，再回退到 listing URL，避免 artifact 丢失可点击链接
+3. canonical_id 基于稳定 title key 生成，避免重放时重复入库
+
+**当前状态**：已识别，已在 P2.1 中兼容
+
+---
+
 ### R3: 数据质量问题
 
 **风险描述**：
