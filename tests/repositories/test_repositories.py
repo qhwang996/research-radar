@@ -6,6 +6,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from datetime import datetime, timezone
+
 from sqlalchemy.orm import Session
 
 from src.db.session import create_all_tables, create_database_engine, create_session_factory
@@ -73,6 +75,58 @@ class RepositoryTestCase(unittest.TestCase):
 
         self.artifacts.delete(updated)
         self.assertIsNone(self.artifacts.get_by_id(saved.id))
+
+    def test_artifact_repository_lists_scored_active_records_by_date_range(self) -> None:
+        """Date range queries should return only active artifacts with scores."""
+
+        range_start = datetime(2026, 3, 10, 0, 0, tzinfo=timezone.utc)
+        range_end = datetime(2026, 3, 11, 0, 0, tzinfo=timezone.utc)
+
+        inside = Artifact(
+            title="Inside Range",
+            authors=["Alice"],
+            year=2026,
+            source_type=SourceType.PAPERS,
+            source_url="https://example.com/papers/inside",
+            final_score=0.9,
+            created_at=datetime(2026, 3, 10, 9, 0, tzinfo=timezone.utc),
+        )
+        no_score = Artifact(
+            title="Missing Score",
+            authors=["Bob"],
+            year=2026,
+            source_type=SourceType.PAPERS,
+            source_url="https://example.com/papers/no-score",
+            created_at=datetime(2026, 3, 10, 10, 0, tzinfo=timezone.utc),
+        )
+        archived = Artifact(
+            title="Archived",
+            authors=["Carol"],
+            year=2026,
+            source_type=SourceType.BLOGS,
+            source_url="https://example.com/blogs/archived",
+            final_score=0.95,
+            status=ArtifactStatus.ARCHIVED,
+            created_at=datetime(2026, 3, 10, 11, 0, tzinfo=timezone.utc),
+        )
+        outside = Artifact(
+            title="Outside Range",
+            authors=["Dave"],
+            year=2026,
+            source_type=SourceType.BLOGS,
+            source_url="https://example.com/blogs/outside",
+            final_score=0.8,
+            created_at=datetime(2026, 3, 11, 1, 0, tzinfo=timezone.utc),
+        )
+
+        self.artifacts.save(inside)
+        self.artifacts.save(no_score)
+        self.artifacts.save(archived)
+        self.artifacts.save(outside)
+
+        records = self.artifacts.list_by_date_range(range_start, range_end)
+
+        self.assertEqual([record.title for record in records], ["Inside Range"])
 
     def test_feedback_repository_lists_events_for_target(self) -> None:
         """Feedback repository should return target-scoped event history."""

@@ -160,6 +160,26 @@
 
 ---
 
+### R3.2: 报告按 `created_at` 过滤会漏掉增量重处理的更新项
+
+**风险描述**：
+- P4.1 按实现规范使用 `Artifact.created_at` 作为日报/周报的时间窗口过滤条件
+- 但 P2.1 的增量处理对于已存在 artifact 采用 upsert update，不会刷新 `created_at`
+- 因此“本周被重新抓取并更新的旧条目”不会出现在本周报告中，报告更接近“首次入库内容摘要”而不是“最近处理变更摘要”
+
+**已观察到的问题（2026-03-10）**：
+- `NormalizationPipeline` 对重复 `canonical_id` 会更新既有记录字段，但保留原始 `created_at`
+- `ReportGenerator` 依据规范使用 `created_at` 做 `[start, end)` 过滤，因此无法感知 update-only 的重处理事件
+
+**缓解措施**：
+1. Phase 1 先严格遵循当前规范，报告语义定义为“新入库 artifact 报告”
+2. 后续可为 Artifact 增加 `last_processed_at` 或引入独立的 processing log，支持“本次处理窗口”视角的报告
+3. 如果未来需要覆盖 update-only 场景，可将报告过滤条件从 `created_at` 扩展为 `max(created_at, last_processed_at)`
+
+**当前状态**：已识别，Phase 1 接受
+
+---
+
 ### R4: 系统稳定性
 
 **风险描述**：

@@ -204,22 +204,38 @@
 
 ## Priority 4: 报告生成（核心流程第四步）
 
-### P4.1 Report Generator
+### P4.1 Report Generator ✅ 已完成（2026-03-10）
 **依赖**：P0.1, P3.1
 **核心功能**：
-- WeeklyReport生成器
-- 简单的markdown模板
-- 输出Top 10 artifacts
+- ✅ BaseReportGenerator 抽象基类
+- ✅ DailyReportGenerator（日级 UTC 窗口，score < 0.6 自动过滤）
+- ✅ WeeklyReportGenerator（ISO week 窗口，Top 10 + score distribution）
+- ✅ 纯函数 markdown renderer helpers
+- ✅ ArtifactRepository 日期范围查询（`created_at` + `final_score`）
+- ✅ 自动写入 `data/reports/daily/` 和 `data/reports/weekly/`
+- ✅ 单元测试与集成测试
 
 **可选功能**：
-- DailyReport
 - MonthlyReport
 - 候选方向生成（可以Phase 1简化为"Top 3主题"）
 
 **验收标准**：
-- 能生成markdown报告
-- 报告包含Top artifacts
-- 格式清晰易读
+- [x] 能生成markdown报告
+- [x] 周报包含Top 10 artifacts
+- [x] 日报/周报在无数据时仍生成空报告
+- [x] 格式清晰易读
+- [x] 有测试覆盖 renderer / daily / weekly / repository query
+
+**实现亮点**：
+- Daily/Weekly 生成器共享基类，日期窗口、缺分告警和写盘逻辑统一
+- renderer 保持纯函数，Markdown 输出可单测，不依赖数据库
+- 周报同时输出 summary、content breakdown、Top 10、score distribution、按来源汇总列表
+- 日报严格区分 high-value / medium-value，只有高分内容显示摘要
+- 全量测试通过（47 passed）
+
+**已知问题**：
+- 当前报告时间窗口按 `created_at` 过滤，增量重处理的 update-only artifact 不会重新进入报告
+- 仍未包含主题聚类、候选研究方向和行动项（依赖后续 LLM / feedback 能力）
 
 ---
 
