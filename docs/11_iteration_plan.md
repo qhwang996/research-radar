@@ -160,17 +160,34 @@
 ### P3.1 Scoring Engine
 **依赖**：P0.1
 **核心功能**：
-- RecencyStrategy（时效性）
-- AuthorityStrategy（来源权威性）
+- BaseScoringStrategy基类（接口定义见15_implementation_guide.md）
+- RecencyStrategy（时效性评分）
+  - 按source_tier区分衰减曲线（详见07_scoring_strategy.md 2.2-2.6节）
+  - top-tier论文：近1年1.0，1-2年0.95，2-3年0.90，3-5年0.80，5年+0.60
+  - 博客：近1月1.0，1-3月0.95，3-6月0.90，6-12月0.80，1年+0.60
+  - 基于published_at计算，缺失时用fetched_at或year降级
+- AuthorityStrategy（来源权威性评分）
+  - 基于source_tier和source_name（详见07_scoring_strategy.md 3.1-3.2节）
+  - top-tier会议：1.0
+  - 高质量博客：0.7
+  - 其他：0.5
 - CompositeStrategy（组合评分）
+  - Phase 1公式：final_score = recency × 0.5 + authority × 0.5
+  - 注意：暂不包含relevance（需要LLM），权重调整为各50%
+- 评分结果写入Artifact的score字段和score_breakdown
 
-**可选功能**：
-- RelevanceStrategy（需要Profile）- 可以Phase 1简化
-- 多策略实验框架 - Phase 3
+**可选功能（Phase 2+）**：
+- RelevanceStrategy（需要LLM + Profile）
+- FeedbackMultiplier（需要反馈数据）
+- 多策略实验框架
 
 **验收标准**：
-- 每个Artifact有final_score
-- 评分合理（最近的高分论文排前面）
+- 每个Artifact有recency_score、authority_score、final_score
+- score_breakdown记录各策略的得分
+- top-tier近年论文排在前面
+- 博客评分低于同期顶会论文
+- 可以对数据库中已有的artifact批量评分
+- 有单元测试
 
 ---
 
