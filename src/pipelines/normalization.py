@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import hashlib
 import json
 import logging
 from pathlib import Path
@@ -19,9 +20,11 @@ from src.crawlers.base import clean_text, split_authors
 from src.db.session import ENGINE, SessionLocal, create_all_tables
 from src.exceptions import PipelineError
 from src.models.artifact import Artifact
-from src.models.enums import SourceType
+from src.models.enums import RawFetchStatus, SourceType
+from src.models.raw_fetch import RawFetch
 from src.repositories.artifact_repository import ArtifactRepository
 from src.pipelines.base import BasePipeline
+from src.repositories.raw_fetch_repository import RawFetchRepository
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +48,27 @@ class RawItemEnvelope:
     raw_path: Path
     payload: dict[str, Any]
     index: int
+
+
+@dataclass(slots=True)
+class RawFilePayload:
+    """A parsed raw JSON file together with metadata used for tracking."""
+
+    raw_path: Path
+    payload: dict[str, Any]
+    items: list[dict[str, Any]]
+    content_hash: str
+
+
+@dataclass(slots=True)
+class FileProcessResult:
+    """Per-file normalization outcome summary."""
+
+    artifacts: list[Artifact]
+    created_count: int = 0
+    updated_count: int = 0
+    failed_count: int = 0
+    skipped: bool = False
 
 
 class NormalizationPipeline(BasePipeline):
@@ -71,44 +95,28 @@ class NormalizationPipeline(BasePipeline):
 
         create_all_tables(self.engine)
         raw_paths = self._resolve_input_paths(input_data)
-        envelopes = self._load_envelopes(raw_paths)
 
         artifacts: list[Artifact] = []
         created_count = 0
         updated_count = 0
         failed_count = 0
+        skipped_count = 0
 
-        for envelope in envelopes:
-            try:
-                artifact_fields = self._normalize_envelope(envelope)
-                if artifact_fields is None:
-                    continue
-
-                session = self.session_factory()
-                try:
-                    repository = ArtifactRepository(session)
-                    artifact, created = self._upsert_artifact(repository, artifact_fields)
-                    artifacts.append(artifact)
-                    if created:
-                        created_count += 1
-                    else:
-                        updated_count += 1
-                finally:
-                    session.close()
-            except Exception as exc:
-                failed_count += 1
-                logger.error(
-                    "Failed to normalize record %s from %s: %s",
-                    envelope.index,
-                    envelope.raw_path,
-                    exc,
-                )
+        for raw_path in raw_paths:
+            result = self._process_raw_path(raw_path)
+            artifacts.extend(result.artifacts)
+            created_count += result.created_count
+            updated_count += result.updated_count
+            failed_count += result.failed_count
+            if result.skipped:
+                skipped_count += 1
 
         logger.info(
-            "Normalization complete: %s created, %s updated, %s failed from %s raw files",
+            "Normalization complete: %s created, %s updated, %s failed, %s skipped from %s raw files",
             created_count,
             updated_count,
             failed_count,
+            skipped_count,
             len(raw_paths),
         )
 
@@ -155,31 +163,164 @@ class NormalizationPipeline(BasePipeline):
             raise PipelineError("Normalization input does not contain any JSON files")
         return resolved
 
-    def _load_envelopes(self, raw_paths: list[Path]) -> list[RawItemEnvelope]:
-        """Load all supported raw records from the provided file paths."""
+    def _process_raw_path(self, raw_path: Path) -> FileProcessResult:
+        """Normalize one raw JSON file and update its RawFetch tracking record."""
 
-        envelopes: list[RawItemEnvelope] = []
-        for raw_path in raw_paths:
-            try:
-                payload = json.loads(raw_path.read_text(encoding="utf-8"))
-            except json.JSONDecodeError as exc:
-                logger.warning("Skipping invalid JSON file %s: %s", raw_path, exc)
-                continue
+        try:
+            raw_file = self._load_raw_file(raw_path)
+        except PipelineError as exc:
+            logger.error("Failed to load raw file %s: %s", raw_path, exc)
+            return FileProcessResult(artifacts=[], failed_count=1)
 
-            items = self._extract_items(payload)
-            for index, item in enumerate(items):
-                if isinstance(item, dict):
-                    envelopes.append(
-                        RawItemEnvelope(
-                            item=item,
-                            raw_path=raw_path,
-                            payload=payload,
-                            index=index,
-                        )
+        session = self.session_factory()
+        raw_fetch_repository = RawFetchRepository(session)
+        artifact_repository = ArtifactRepository(session)
+        tracked_file_path = str(raw_path.resolve())
+        raw_fetch: RawFetch | None = None
+
+        try:
+            existing_fetch = raw_fetch_repository.get_by_file_path(tracked_file_path)
+            if self._should_skip_raw_file(existing_fetch, raw_file.content_hash):
+                logger.info("Skipping unchanged raw file %s", raw_path)
+                return FileProcessResult(artifacts=[], skipped=True)
+
+            raw_fetch = self._start_raw_fetch(raw_fetch_repository, raw_file, existing_fetch)
+
+            artifacts: list[Artifact] = []
+            created_count = 0
+            updated_count = 0
+            failed_count = 0
+
+            for index, item in enumerate(raw_file.items):
+                envelope = RawItemEnvelope(
+                    item=item,
+                    raw_path=raw_file.raw_path,
+                    payload=raw_file.payload,
+                    index=index,
+                )
+                try:
+                    artifact_fields = self._normalize_envelope(envelope)
+                    if artifact_fields is None:
+                        continue
+
+                    artifact, created = self._upsert_artifact(artifact_repository, artifact_fields)
+                    artifacts.append(artifact)
+                    if created:
+                        created_count += 1
+                    else:
+                        updated_count += 1
+                except Exception as exc:
+                    failed_count += 1
+                    logger.error(
+                        "Failed to normalize record %s from %s: %s",
+                        envelope.index,
+                        envelope.raw_path,
+                        exc,
                     )
 
-        logger.info("Loaded %s raw records from %s files", len(envelopes), len(raw_paths))
-        return envelopes
+            self._finish_raw_fetch(
+                raw_fetch_repository,
+                raw_fetch,
+                processed_count=created_count + updated_count,
+                failed_count=failed_count,
+            )
+            return FileProcessResult(
+                artifacts=artifacts,
+                created_count=created_count,
+                updated_count=updated_count,
+                failed_count=failed_count,
+            )
+        except Exception as exc:
+            if raw_fetch is not None:
+                self._mark_raw_fetch_failed(raw_fetch_repository, raw_fetch)
+            logger.error("Failed to process raw file %s: %s", raw_path, exc)
+            return FileProcessResult(artifacts=[], failed_count=1)
+        finally:
+            session.close()
+
+    def _load_raw_file(self, raw_path: Path) -> RawFilePayload:
+        """Load and validate one raw JSON file."""
+
+        try:
+            raw_text = raw_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise PipelineError(f"Failed to read raw file {raw_path}: {exc}") from exc
+        content_hash = hashlib.sha256(raw_text.encode("utf-8")).hexdigest()
+        try:
+            payload = json.loads(raw_text)
+        except json.JSONDecodeError as exc:
+            raise PipelineError(f"Invalid JSON in {raw_path}: {exc}") from exc
+
+        if not isinstance(payload, dict):
+            raise PipelineError(f"Raw payload must be a JSON object: {raw_path}")
+
+        items = [item for item in self._extract_items(payload) if isinstance(item, dict)]
+        logger.info("Loaded %s raw records from %s", len(items), raw_path)
+        return RawFilePayload(
+            raw_path=raw_path.resolve(),
+            payload=payload,
+            items=items,
+            content_hash=content_hash,
+        )
+
+    def _should_skip_raw_file(self, raw_fetch: RawFetch | None, content_hash: str) -> bool:
+        """Return whether an existing RawFetch means this file can be skipped."""
+
+        return (
+            raw_fetch is not None
+            and raw_fetch.status == RawFetchStatus.PROCESSED
+            and raw_fetch.content_hash == content_hash
+            and raw_fetch.normalize_version == self.normalize_version
+        )
+
+    def _start_raw_fetch(
+        self,
+        repository: RawFetchRepository,
+        raw_file: RawFilePayload,
+        existing_fetch: RawFetch | None,
+    ) -> RawFetch:
+        """Create or reset a RawFetch record before processing a file."""
+
+        payload = raw_file.payload
+        items = raw_file.items
+        raw_fetch = existing_fetch or RawFetch(file_path=str(raw_file.raw_path))
+        raw_fetch.content_hash = raw_file.content_hash
+        raw_fetch.source_type = self._infer_raw_fetch_source_type(payload, raw_file.raw_path, items)
+        raw_fetch.source_name = self._infer_raw_fetch_source_name(payload, items)
+        raw_fetch.item_count = len(items)
+        raw_fetch.processed_count = 0
+        raw_fetch.failed_count = 0
+        raw_fetch.status = RawFetchStatus.PENDING
+        raw_fetch.processed_at = None
+        raw_fetch.normalize_version = self.normalize_version
+        return repository.save(raw_fetch)
+
+    def _finish_raw_fetch(
+        self,
+        repository: RawFetchRepository,
+        raw_fetch: RawFetch,
+        *,
+        processed_count: int,
+        failed_count: int,
+    ) -> RawFetch:
+        """Persist final processing statistics for a raw file."""
+
+        raw_fetch.processed_count = processed_count
+        raw_fetch.failed_count = failed_count
+        raw_fetch.status = RawFetchStatus.PROCESSED if failed_count == 0 else RawFetchStatus.FAILED
+        raw_fetch.processed_at = datetime.now(timezone.utc)
+        return repository.save(raw_fetch)
+
+    def _mark_raw_fetch_failed(self, repository: RawFetchRepository, raw_fetch: RawFetch) -> None:
+        """Persist a failed status when a file aborts before normal completion."""
+
+        raw_fetch.status = RawFetchStatus.FAILED
+        raw_fetch.failed_count = max(raw_fetch.failed_count, 1)
+        raw_fetch.processed_at = datetime.now(timezone.utc)
+        try:
+            repository.save(raw_fetch)
+        except Exception:  # pragma: no cover - defensive logging boundary
+            logger.exception("Failed to update RawFetch failure status for %s", raw_fetch.file_path)
 
     def _extract_items(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
         """Extract raw items from both legacy and current crawler payload shapes."""
@@ -385,6 +526,27 @@ class NormalizationPipeline(BasePipeline):
             if cleaned:
                 return cleaned
         return None
+
+    def _infer_raw_fetch_source_type(
+        self,
+        payload: dict[str, Any],
+        raw_path: Path,
+        items: list[dict[str, Any]],
+    ) -> SourceType:
+        """Infer the source type for file-level RawFetch tracking."""
+
+        seed_item = items[0] if items else {}
+        return self._infer_source_type(seed_item, payload, raw_path)
+
+    def _infer_raw_fetch_source_name(
+        self,
+        payload: dict[str, Any],
+        items: list[dict[str, Any]],
+    ) -> str:
+        """Infer the source name for file-level RawFetch tracking."""
+
+        seed_item = items[0] if items else {}
+        return self._infer_source_name(seed_item, payload)
 
     def _infer_year(
         self,

@@ -10,12 +10,14 @@ from sqlalchemy.orm import Session
 
 from src.db.session import create_all_tables, create_database_engine, create_session_factory
 from src.models.artifact import Artifact
-from src.models.enums import ArtifactStatus, FeedbackTargetType, FeedbackType, SourceType
+from src.models.enums import ArtifactStatus, FeedbackTargetType, FeedbackType, RawFetchStatus, SourceType
 from src.models.feedback import FeedbackEvent
 from src.models.profile import Profile
+from src.models.raw_fetch import RawFetch
 from src.repositories.artifact_repository import ArtifactRepository
 from src.repositories.feedback_repository import FeedbackRepository
 from src.repositories.profile_repository import ProfileRepository
+from src.repositories.raw_fetch_repository import RawFetchRepository
 
 
 class RepositoryTestCase(unittest.TestCase):
@@ -35,6 +37,7 @@ class RepositoryTestCase(unittest.TestCase):
         self.artifacts = ArtifactRepository(self.session)
         self.feedback = FeedbackRepository(self.session)
         self.profiles = ProfileRepository(self.session)
+        self.raw_fetches = RawFetchRepository(self.session)
 
     def tearDown(self) -> None:
         """Close the session and remove the temporary database."""
@@ -121,3 +124,37 @@ class RepositoryTestCase(unittest.TestCase):
         self.assertEqual(self.profiles.get_by_profile_version("v1").id, inactive.id)
         self.assertEqual(self.profiles.get_latest().id, active.id)
         self.assertEqual(self.profiles.get_latest_active().profile_version, "v2")
+
+    def test_raw_fetch_repository_tracks_files_by_path_and_status(self) -> None:
+        """RawFetch repository should support path lookups and status filtering."""
+
+        first = RawFetch(
+            file_path="/tmp/raw/first.json",
+            content_hash="hash-1",
+            source_type=SourceType.PAPERS,
+            source_name="NDSS",
+            item_count=1,
+            processed_count=1,
+            failed_count=0,
+            status=RawFetchStatus.PROCESSED,
+        )
+        second = RawFetch(
+            file_path="/tmp/raw/second.json",
+            content_hash="hash-2",
+            source_type=SourceType.BLOGS,
+            source_name="PortSwigger Research",
+            item_count=1,
+            processed_count=0,
+            failed_count=1,
+            status=RawFetchStatus.FAILED,
+        )
+
+        self.raw_fetches.save(first)
+        self.raw_fetches.save(second)
+
+        fetched = self.raw_fetches.get_by_file_path("/tmp/raw/first.json")
+
+        self.assertIsNotNone(fetched)
+        self.assertEqual(fetched.content_hash, "hash-1")
+        self.assertEqual(len(self.raw_fetches.list_by_status(RawFetchStatus.PROCESSED)), 1)
+        self.assertEqual(self.raw_fetches.list_by_status(RawFetchStatus.FAILED)[0].file_path, second.file_path)

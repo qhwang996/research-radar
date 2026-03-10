@@ -10,9 +10,11 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from src.db.session import create_all_tables, create_database_engine, create_session_factory
-from src.models.enums import SourceType
+from src.models.enums import RawFetchStatus, SourceType
+from src.models.raw_fetch import RawFetch
 from src.pipelines.normalization import NormalizationPipeline
 from src.repositories.artifact_repository import ArtifactRepository
+from src.repositories.raw_fetch_repository import RawFetchRepository
 
 
 class NormalizationPipelineTestCase(unittest.TestCase):
@@ -192,6 +194,106 @@ class NormalizationPipelineTestCase(unittest.TestCase):
         finally:
             session.close()
 
+    def test_process_skips_already_processed_file_when_content_hash_is_unchanged(self) -> None:
+        """Unchanged files should be skipped after a successful normalization run."""
+
+        raw_path = self._write_json(
+            "unchanged.json",
+            {
+                "source": "NDSS",
+                "fetched_at": "2026-03-10T08:00:00+00:00",
+                "papers": [
+                    {
+                        "title": "Stable NDSS Paper",
+                        "authors": ["Alice Example"],
+                        "conference": "NDSS 2026",
+                        "year": 2026,
+                        "paper_url": "https://example.com/ndss/stable-paper",
+                        "source_url": "https://example.com/ndss/listing",
+                    }
+                ],
+            },
+        )
+
+        first_run = self.pipeline.process(raw_path)
+        second_run = self.pipeline.process(raw_path)
+
+        self.assertEqual(len(first_run), 1)
+        self.assertEqual(second_run, [])
+
+        session: Session = self.session_factory()
+        try:
+            artifacts = ArtifactRepository(session).list_all()
+            raw_fetch = RawFetchRepository(session).get_by_file_path(str(raw_path.resolve()))
+            self.assertEqual(len(artifacts), 1)
+            self.assertIsNotNone(raw_fetch)
+            self.assertEqual(raw_fetch.status, RawFetchStatus.PROCESSED)
+            self.assertEqual(raw_fetch.processed_count, 1)
+            self.assertEqual(raw_fetch.failed_count, 0)
+        finally:
+            session.close()
+
+    def test_process_reprocesses_file_when_content_hash_changes(self) -> None:
+        """Changed files should be reprocessed and refresh the RawFetch hash."""
+
+        raw_path = self._write_json(
+            "changed.json",
+            {
+                "source": "PortSwigger Research",
+                "source_type": "blogs",
+                "fetched_at": "2026-03-10T11:00:00+00:00",
+                "items": [
+                    {
+                        "title": "Request Smuggling Notes",
+                        "authors": ["PortSwigger Research"],
+                        "article_url": "https://portswigger.net/research/request-smuggling-notes",
+                        "source_url": "https://portswigger.net/research/articles",
+                        "excerpt": "Initial summary.",
+                    }
+                ],
+            },
+        )
+
+        self.pipeline.process(raw_path)
+        first_hash = self._get_raw_fetch(raw_path).content_hash
+
+        raw_path.write_text(
+            json.dumps(
+                {
+                    "source": "PortSwigger Research",
+                    "source_type": "blogs",
+                    "fetched_at": "2026-03-10T12:00:00+00:00",
+                    "items": [
+                        {
+                            "title": "Request Smuggling Notes",
+                            "authors": ["PortSwigger Research"],
+                            "article_url": "https://portswigger.net/research/request-smuggling-notes",
+                            "source_url": "https://portswigger.net/research/articles",
+                            "excerpt": "Updated summary from the second fetch.",
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+        second_run = self.pipeline.process(raw_path)
+        updated_raw_fetch = self._get_raw_fetch(raw_path)
+
+        self.assertEqual(len(second_run), 1)
+        self.assertNotEqual(updated_raw_fetch.content_hash, first_hash)
+        self.assertEqual(updated_raw_fetch.status, RawFetchStatus.PROCESSED)
+
+        session: Session = self.session_factory()
+        try:
+            artifacts = ArtifactRepository(session).list_all()
+            self.assertEqual(len(artifacts), 1)
+            self.assertEqual(artifacts[0].abstract, "Updated summary from the second fetch.")
+        finally:
+            session.close()
+
     def _write_json(self, path: str | Path, payload: dict[str, object]) -> Path:
         """Write a JSON payload into the temporary workspace."""
 
@@ -199,3 +301,12 @@ class NormalizationPipelineTestCase(unittest.TestCase):
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         return target.resolve()
+
+    def _get_raw_fetch(self, raw_path: Path) -> RawFetch | None:
+        """Return the tracked RawFetch record for the given file path."""
+
+        session: Session = self.session_factory()
+        try:
+            return RawFetchRepository(session).get_by_file_path(str(raw_path.resolve()))
+        finally:
+            session.close()

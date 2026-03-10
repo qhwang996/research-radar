@@ -38,3 +38,11 @@ class SourceType(str, Enum):
     BLOGS = "blogs"
     ADVISORIES = "advisories"
     BOOKMARKS = "bookmarks"
+
+
+class RawFetchStatus(str, Enum):
+    """Lifecycle states for raw fetch tracking records."""
+
+    PENDING = "pending"
+    PROCESSED = "processed"
+    FAILED = "failed"

@@ -11,9 +11,10 @@ from sqlalchemy.orm import Session
 
 from src.db.session import create_all_tables, create_database_engine, create_session_factory
 from src.models.artifact import Artifact
-from src.models.enums import ArtifactStatus, FeedbackTargetType, FeedbackType, SourceType
+from src.models.enums import ArtifactStatus, FeedbackTargetType, FeedbackType, RawFetchStatus, SourceType
 from src.models.feedback import FeedbackEvent
 from src.models.profile import Profile
+from src.models.raw_fetch import RawFetch
 
 
 class DatabaseTestCase(unittest.TestCase):
@@ -121,3 +122,28 @@ class ModelPersistenceTestCase(DatabaseTestCase):
         self.assertEqual(profile.interests, ["deserialization", "fuzzing"])
         self.assertTrue(profile.preferences["depth_over_breadth"])
         self.assertTrue(profile.is_active)
+
+    def test_raw_fetch_persists_tracking_fields(self) -> None:
+        """RawFetch should persist file tracking metadata and processing status."""
+
+        raw_fetch = RawFetch(
+            file_path="/tmp/raw/ndss_2026.json",
+            content_hash="abc123",
+            source_type=SourceType.PAPERS,
+            source_name="NDSS",
+            item_count=10,
+            processed_count=10,
+            failed_count=0,
+            status=RawFetchStatus.PROCESSED,
+            normalize_version="v1",
+        )
+
+        self.session.add(raw_fetch)
+        self.session.commit()
+        self.session.refresh(raw_fetch)
+
+        self.assertIsNotNone(raw_fetch.id)
+        self.assertEqual(raw_fetch.file_path, "/tmp/raw/ndss_2026.json")
+        self.assertEqual(raw_fetch.status, RawFetchStatus.PROCESSED)
+        self.assertEqual(raw_fetch.processed_count, 10)
+        self.assertEqual(raw_fetch.normalize_version, "v1")
