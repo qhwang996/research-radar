@@ -85,7 +85,7 @@
 
 ## Priority 2: 数据处理（核心流程第二步）
 
-### P2.1 Normalization Pipeline ✅ 已完成（2026-03-10）
+### P2.1 Normalization Pipeline ⚠️ 需补充（2026-03-10）
 **依赖**：P0.1, P1.1
 **核心功能**：
 - ✅ 读取 raw JSON（支持单文件、目录、递归扫描）
@@ -95,17 +95,39 @@
 - ✅ 基础去重（基于 title key + source context）
 - ✅ upsert 保存到数据库
 - ✅ 对现有 `data/raw/papers` 试跑成功
+- ❌ **缺少RawFetch追踪模型**（需补充）
 
-**可选功能**：
-- 复杂去重算法
-- 数据验证
+**需补充：RawFetch追踪机制**
 
-**验收标准**：
-- ✅ 能处理爬虫输出
-- ✅ Artifact 正确存入数据库
-- ✅ 去重有效
+目的：记录每个JSON文件的处理状态，支持增量处理。
 
-**实现亮点**：
+RawFetch模型字段：
+- `id`: 主键
+- `file_path`: JSON文件路径
+- `content_hash`: 文件内容hash（用于检测文件变化）
+- `source_type`: papers/blogs
+- `source_name`: 来源名称
+- `item_count`: 文件中的条目数
+- `processed_count`: 成功处理的条目数
+- `failed_count`: 失败的条目数
+- `status`: pending/processed/failed
+- `processed_at`: 处理完成时间
+- `created_at/updated_at`: 时间戳
+
+Normalization Pipeline修改：
+1. 处理前：查询RawFetch表，跳过已处理且content_hash未变化的文件
+2. 处理中：创建RawFetch记录
+3. 处理后：更新RawFetch状态和统计
+
+验收标准：
+- [ ] RawFetch模型实现
+- [ ] RawFetchRepository实现
+- [ ] NormalizationPipeline集成RawFetch追踪
+- [ ] 增量处理有效（已处理的文件被跳过）
+- [ ] 文件变化后重新处理（content_hash变化）
+- [ ] 单元测试
+
+**已完成部分的实现亮点**：
 - 支持历史 raw 数据重放，不需要迁移旧文件
 - 兼容论文和博客两类输入
 - 真实数据试跑完成：1499 条 raw 记录归一化后落成 1168 条 artifact
