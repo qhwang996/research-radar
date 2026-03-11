@@ -151,11 +151,14 @@
 - 当前只完成 live API 协议适配和 mocked 测试，尚未用真实 API key 做端到端验证
 - 暂未实现 TTL、缓存失效策略和成本统计聚合报表
 
-### P2.3 Enrichment Pipeline
+### P2.3 Enrichment Pipeline ✅ 已完成（2026-03-11）
 **依赖**：P0.1, P2.2
 **核心功能**：
-- 生成L1摘要（一句话）
-- 提取关键词
+- ✅ EnrichmentPipeline（读取数据库中的 active artifact）
+- ✅ 生成 L1 摘要（一句话）
+- ✅ 提取关键词标签并写回 `Artifact.tags`
+- ✅ 单次 LLM 调用同时返回 `summary_l1 + tags`
+- ✅ 只处理未增强 artifact，已存在摘要和 tags 的内容自动跳过
 
 **可选功能**：
 - L2摘要（三段式）
@@ -163,9 +166,20 @@
 - 批处理优化
 
 **验收标准**：
-- 每个Artifact有L1摘要
-- 有关键词
-- LLM成本可控
+- [x] 未增强 Artifact 可生成 `summary_l1`
+- [x] 可生成 tags / keywords
+- [x] 单次调用完成两个字段，Phase 1 成本可控
+- [x] 单元测试覆盖成功、跳过、定向处理、单条失败继续
+
+**实现亮点**：
+- 沿用 P2.2 的 `LLMClient`，使用 FAST tier，并为每个 artifact 设置稳定 cache key
+- 单条 artifact 失败不会中断整批 enrichment，符合 pipeline 的容错要求
+- prompt 模板已落到 `prompts/summarize_artifact.md`，后续可单独迭代 prompt 而不改代码
+- 支持把最新 active profile 的兴趣上下文拼入 prompt，便于后续向 relevance / personalization 过渡
+
+**已知问题**：
+- 当前仍是逐条调用，没有做真正的 batch prompt 合并
+- 结构化输出依赖模型遵守 JSON 格式，live 环境下仍需 smoke test 验证稳定性
 
 ---
 

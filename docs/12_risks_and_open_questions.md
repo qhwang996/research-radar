@@ -180,6 +180,26 @@
 
 ---
 
+### R3.3: Enrichment 的结构化 JSON 输出存在模型漂移风险
+
+**风险描述**：
+- P2.3 采用“单次 LLM 调用返回 `summary_l1 + tags` JSON”的方式降低 token 成本
+- 但 live 模型在 prompt 漂移、模型升级或长上下文场景下，可能输出额外解释文字、Markdown fence 或非 JSON 格式
+- 一旦结构化输出不稳定，当前 pipeline 会把该条 artifact 记为失败并跳过
+
+**已观察到的问题（2026-03-11）**：
+- 当前实现已支持去掉 code fence 后再解析 JSON，并对单条失败做容错
+- 但还没有真实 API 端到端调用，无法确认实际模型对该 prompt 的服从性
+
+**缓解措施**：
+1. 继续保持严格的 JSON-only prompt，并在 smoke test 中优先验证结构化输出稳定性
+2. 当前 pipeline 已按 artifact 级别隔离失败，单条异常不会阻塞整批 enrichment
+3. 如 live 验证发现漂移频繁，可补充更强的 response schema 约束或增加 fallback parser
+
+**当前状态**：已识别，待 live 验证
+
+---
+
 ### R4: 系统稳定性
 
 **风险描述**：
