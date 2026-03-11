@@ -18,6 +18,8 @@ build/
 
 # Data
 data/raw/
+data/cache/
+data/reports/
 data/*.db
 data/*.db-*
 *.html

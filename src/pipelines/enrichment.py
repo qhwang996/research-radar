@@ -214,10 +214,7 @@ class EnrichmentPipeline(BasePipeline):
         """Parse and normalize one structured LLM response."""
 
         cleaned = self._strip_code_fences(response_text)
-        try:
-            payload = json.loads(cleaned)
-        except json.JSONDecodeError as exc:
-            raise PipelineError(f"LLM enrichment response is not valid JSON: {response_text}") from exc
+        payload = self._load_payload(cleaned, response_text)
 
         if not isinstance(payload, dict):
             raise PipelineError("LLM enrichment response must be a JSON object")
@@ -230,6 +227,65 @@ class EnrichmentPipeline(BasePipeline):
             raise PipelineError("LLM enrichment response missing tags")
 
         return EnrichmentPayload(summary_l1=summary, tags=tags)
+
+    def _load_payload(self, cleaned: str, response_text: str) -> dict[str, Any]:
+        """Load a structured payload, with a relaxed fallback for common JSON drift."""
+
+        try:
+            payload = json.loads(cleaned)
+        except json.JSONDecodeError:
+            payload = self._parse_relaxed_payload(cleaned)
+            if payload is None:
+                raise PipelineError(f"LLM enrichment response is not valid JSON: {response_text}") from None
+
+        if not isinstance(payload, dict):
+            raise PipelineError("LLM enrichment response must be a JSON object")
+        return payload
+
+    def _parse_relaxed_payload(self, cleaned: str) -> dict[str, Any] | None:
+        """Salvage summary/tags from malformed JSON when summary contains bare quotes."""
+
+        summary_match = re.search(r'"summary_l1"\s*:\s*"', cleaned)
+        tags_match = re.search(r'"tags"\s*:\s*\[', cleaned)
+        if summary_match is None or tags_match is None or summary_match.start() >= tags_match.start():
+            return None
+
+        summary_start = summary_match.end()
+        summary_end = cleaned.rfind('",', summary_start, tags_match.start())
+        if summary_end == -1:
+            return None
+
+        tags_start = cleaned.find("[", tags_match.start())
+        tags_end = self._find_matching_bracket(cleaned, tags_start)
+        if tags_start == -1 or tags_end == -1:
+            return None
+
+        try:
+            tags = json.loads(cleaned[tags_start : tags_end + 1])
+        except json.JSONDecodeError:
+            return None
+
+        return {
+            "summary_l1": cleaned[summary_start:summary_end],
+            "tags": tags,
+        }
+
+    def _find_matching_bracket(self, text: str, start_index: int) -> int:
+        """Return the matching closing bracket index for one JSON array."""
+
+        if start_index < 0 or start_index >= len(text) or text[start_index] != "[":
+            return -1
+
+        depth = 0
+        for index in range(start_index, len(text)):
+            character = text[index]
+            if character == "[":
+                depth += 1
+            elif character == "]":
+                depth -= 1
+                if depth == 0:
+                    return index
+        return -1
 
     def _strip_code_fences(self, response_text: str) -> str:
         """Remove optional markdown code fences around a JSON payload."""

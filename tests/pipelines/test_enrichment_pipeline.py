@@ -184,6 +184,39 @@ class EnrichmentPipelineTestCase(unittest.TestCase):
         finally:
             session.close()
 
+    def test_process_salvages_summary_with_unescaped_quotes(self) -> None:
+        """Malformed JSON with bare quotes inside summary_l1 should still be recovered."""
+
+        llm_client = StubLLMClient(
+            [
+                """```json
+{
+  "summary_l1": "VETEOS is a static analysis tool for EOSIO contracts that detects "Groundhog Day" vulnerabilities.",
+  "tags": ["eosio-smart-contracts", "static-analysis", "blockchain-security"]
+}
+```"""
+            ]
+        )
+        pipeline = EnrichmentPipeline(
+            session_factory=self.session_factory,
+            llm_client=llm_client,
+            prompt_template_path=self.workspace / "prompt.md",
+        )
+        (self.workspace / "prompt.md").write_text("{{artifact_context}}", encoding="utf-8")
+        artifact = self._save_artifact(title="VETEOS")
+
+        enriched = pipeline.process([artifact.id])
+
+        self.assertEqual(len(enriched), 1)
+        self.assertEqual(
+            enriched[0].summary_l1,
+            'VETEOS is a static analysis tool for EOSIO contracts that detects "Groundhog Day" vulnerabilities.',
+        )
+        self.assertEqual(
+            enriched[0].tags,
+            ["eosio-smart-contracts", "static-analysis", "blockchain-security"],
+        )
+
     def _save_artifact(self, **kwargs) -> Artifact:
         """Persist one artifact with sensible defaults."""
 

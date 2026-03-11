@@ -33,8 +33,10 @@
 **已知问题**：
 - 部分 artifact 只有 year 没有 published_at，recency 评分精度有限（用年中时间点回退）
 - 报告按 created_at 过滤，增量重处理的 update-only artifact 不会出现在新报告中
+- 报告日期窗口按 UTC 解释，操作时如果按本地时区理解日期，可能得到空日报
 - Raw JSON 历史格式不一致，NormalizationPipeline 已兼容 legacy 和 current 格式
 - Raw 文件删除条目时不会自动回收旧 artifact（Phase 1 只做 append/update）
+- 当前 live 语料全部是 2025 顶会论文，P3.1 的 recency + authority 在该数据集上区分度很弱，weekly top list 大量并列 1.0
 
 **状态**：Phase 1 接受
 
@@ -44,9 +46,13 @@
 
 **风险**：LLM 可能输出非 JSON 格式（Markdown fence、额外解释文字）。
 
-**缓解**：已支持去除 code fence、单条失败不阻塞整批、待 live smoke test 验证。
+**缓解**：已支持去除 code fence、单条失败不阻塞整批，并新增 relaxed parser 兼容 summary 中 bare quote 导致的 JSON 失效。
 
-**状态**：待 live 验证
+**已知问题**：
+- 2026-03-11 live run 中，artifact `527` 曾返回 fenced JSON 且 `summary_l1` 内含未转义双引号，首轮 enrichment 因此失败
+- 同一条目在补跑时通过 cache hit + relaxed parser 成功恢复，无需再次调用 provider
+
+**状态**：已 live 验证，部分缓解
 
 ---
 
@@ -66,7 +72,11 @@
 
 **缓解**：live 部署前用低成本模型做 smoke test、配置 API budget cap。
 
-**状态**：待真实凭证验证
+**已知问题**：
+- Anthropic-compatible 第三方网关已在 2026-03-11 完成 live 验证，使用完整 endpoint `/api/v1/messages`
+- OpenAI-compatible 路径仍未做 live 验证
+
+**状态**：部分缓解
 
 ---
 

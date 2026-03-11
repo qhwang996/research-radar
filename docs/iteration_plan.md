@@ -146,9 +146,10 @@
 - 直接基于 HTTP API 实现，不依赖额外 SDK，保持依赖面最小
 - 文件缓存落在 `data/cache/llm/`，便于回放和排查
 - OpenAI / Anthropic 的错误处理统一归一到 retryable / non-retryable 语义
+- 已完成一次 Anthropic-compatible 第三方网关 live 验证（`/api/v1/messages` + 模型 env 覆盖）
 
 **已知问题**：
-- 当前只完成 live API 协议适配和 mocked 测试，尚未用真实 API key 做端到端验证
+- Anthropic-compatible 路径已做真实凭证验证，OpenAI provider 仍未做 live 验证
 - 暂未实现 TTL、缓存失效策略和成本统计聚合报表
 
 ### P2.3 Enrichment Pipeline ✅ 已完成（2026-03-11）
@@ -176,10 +177,11 @@
 - 单条 artifact 失败不会中断整批 enrichment，符合 pipeline 的容错要求
 - prompt 模板已落到 `prompts/summarize_artifact.md`，后续可单独迭代 prompt 而不改代码
 - 支持把最新 active profile 的兴趣上下文拼入 prompt，便于后续向 relevance / personalization 过渡
+- 已完成一次 1168 条 artifact 的 live enrichment，补跑时通过 cache hit 修复单条失败样本
 
 **已知问题**：
 - 当前仍是逐条调用，没有做真正的 batch prompt 合并
-- 结构化输出依赖模型遵守 JSON 格式，live 环境下仍需 smoke test 验证稳定性
+- 结构化输出仍依赖模型大体遵守 JSON；已新增 relaxed parser 兼容 bare quote / fenced JSON，但更复杂漂移仍可能失败
 
 ---
 
@@ -263,6 +265,7 @@
 
 **已知问题**：
 - 当前报告时间窗口按 `created_at` 过滤，增量重处理的 update-only artifact 不会重新进入报告
+- 日报日期参数按 UTC 日历日解释；live 数据全部落在 `2026-03-10` UTC，所以 `2026-03-11` 日报为空
 - 仍未包含主题聚类、候选研究方向和行动项（依赖后续 LLM / feedback 能力）
 
 ---
