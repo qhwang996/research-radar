@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import unittest
+from unittest.mock import patch
 
 from src.llm.base import ModelTier
 from src.llm.providers import AnthropicProvider, OpenAIProvider
@@ -71,7 +73,7 @@ class OpenAIProviderTestCase(unittest.TestCase):
                 )
             ]
         )
-        provider = OpenAIProvider(api_key="test-key", session=session)
+        provider = OpenAIProvider(api_key="test-key", base_url="https://api.openai.com/v1/responses", session=session)
 
         response = provider.generate(
             prompt="Summarize this paper",
@@ -91,13 +93,39 @@ class OpenAIProviderTestCase(unittest.TestCase):
     def test_default_model_map_exposes_all_tiers(self) -> None:
         """The OpenAI provider should provide a model for each tier."""
 
-        provider = OpenAIProvider(api_key="test-key", session=FakeSession([]))
+        provider = OpenAIProvider(api_key="test-key", base_url="https://api.openai.com/v1/responses", session=FakeSession([]))
         model_map = provider.default_model_map()
 
         self.assertIn(ModelTier.FAST, model_map)
         self.assertIn(ModelTier.STANDARD, model_map)
         self.assertIn(ModelTier.PREMIUM, model_map)
-        self.assertEqual(model_map[ModelTier.PREMIUM], "gpt-4.1")
+        self.assertEqual(model_map[ModelTier.PREMIUM], "gpt-5.4")
+
+    def test_default_model_map_allows_env_overrides(self) -> None:
+        """OpenAI model defaults should be overridable via env vars."""
+
+        with patch.dict(
+            os.environ,
+            {
+                "OPENAI_MODEL_FAST": "thirdparty-fast",
+                "OPENAI_MODEL_STANDARD": "thirdparty-standard",
+                "OPENAI_MODEL_PREMIUM": "thirdparty-premium",
+            },
+            clear=False,
+        ):
+            provider = OpenAIProvider(
+                api_key="test-key",
+                base_url="https://api.openai.com/v1/responses",
+                session=FakeSession([]),
+            )
+            self.assertEqual(
+                provider.default_model_map(),
+                {
+                    ModelTier.FAST: "thirdparty-fast",
+                    ModelTier.STANDARD: "thirdparty-standard",
+                    ModelTier.PREMIUM: "thirdparty-premium",
+                },
+            )
 
 
 class AnthropicProviderTestCase(unittest.TestCase):
@@ -124,7 +152,7 @@ class AnthropicProviderTestCase(unittest.TestCase):
                 )
             ]
         )
-        provider = AnthropicProvider(api_key="anthropic-key", session=session)
+        provider = AnthropicProvider(api_key="anthropic-key", base_url="https://api.anthropic.com/v1/messages", session=session)
 
         response = provider.generate(
             prompt="Explain the significance",
@@ -147,6 +175,32 @@ class AnthropicProviderTestCase(unittest.TestCase):
     def test_default_model_map_uses_latest_premium_alias(self) -> None:
         """The Anthropic provider should default PREMIUM to the latest alias."""
 
-        provider = AnthropicProvider(api_key="anthropic-key", session=FakeSession([]))
+        provider = AnthropicProvider(api_key="anthropic-key", base_url="https://api.anthropic.com/v1/messages", session=FakeSession([]))
 
         self.assertEqual(provider.default_model_map()[ModelTier.PREMIUM], "claude-opus-4-6")
+
+    def test_default_model_map_allows_env_overrides(self) -> None:
+        """Anthropic model defaults should be overridable via env vars."""
+
+        with patch.dict(
+            os.environ,
+            {
+                "ANTHROPIC_MODEL_FAST": "thirdparty-haiku",
+                "ANTHROPIC_MODEL_STANDARD": "thirdparty-sonnet",
+                "ANTHROPIC_MODEL_PREMIUM": "thirdparty-opus",
+            },
+            clear=False,
+        ):
+            provider = AnthropicProvider(
+                api_key="anthropic-key",
+                base_url="https://api.anthropic.com/v1/messages",
+                session=FakeSession([]),
+            )
+            self.assertEqual(
+                provider.default_model_map(),
+                {
+                    ModelTier.FAST: "thirdparty-haiku",
+                    ModelTier.STANDARD: "thirdparty-sonnet",
+                    ModelTier.PREMIUM: "thirdparty-opus",
+                },
+            )

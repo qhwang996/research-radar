@@ -10,8 +10,18 @@ import requests
 from src.llm.base import LLMProvider, LLMProviderError, LLMResponse, LLMUsage, ModelTier, safe_int
 
 
-OPENAI_RESPONSE_URL = "https://api.openai.com/v1/responses"
-ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages"
+DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1/responses"
+DEFAULT_ANTHROPIC_BASE_URL = "https://api.anthropic.com/v1/messages"
+DEFAULT_OPENAI_MODELS = {
+    ModelTier.FAST: "gpt-4o-mini",
+    ModelTier.STANDARD: "gpt-5.2",
+    ModelTier.PREMIUM: "gpt-5.4",
+}
+DEFAULT_ANTHROPIC_MODELS = {
+    ModelTier.FAST: "claude-haiku-4-5-20251001",
+    ModelTier.STANDARD: "claude-sonnet-4-6",
+    ModelTier.PREMIUM: "claude-opus-4-6",
+}
 
 
 class OpenAIProvider(LLMProvider):
@@ -23,23 +33,19 @@ class OpenAIProvider(LLMProvider):
         self,
         *,
         api_key: str | None = None,
-        base_url: str = OPENAI_RESPONSE_URL,
+        base_url: str | None = None,
         session: requests.Session | Any | None = None,
     ) -> None:
         """Initialize the provider with optional overrides for tests."""
 
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
-        self.base_url = base_url
+        self.base_url = base_url or os.getenv("OPENAI_BASE_URL", DEFAULT_OPENAI_BASE_URL)
         self.session = session or requests.Session()
 
     def default_model_map(self) -> dict[ModelTier, str]:
         """Return default OpenAI models for each tier."""
 
-        return {
-            ModelTier.FAST: "gpt-4o-mini",
-            ModelTier.STANDARD: "gpt-4o",
-            ModelTier.PREMIUM: "gpt-4.1",
-        }
+        return _resolve_model_map("OPENAI", DEFAULT_OPENAI_MODELS)
 
     def generate(
         self,
@@ -133,23 +139,19 @@ class AnthropicProvider(LLMProvider):
         self,
         *,
         api_key: str | None = None,
-        base_url: str = ANTHROPIC_MESSAGES_URL,
+        base_url: str | None = None,
         session: requests.Session | Any | None = None,
     ) -> None:
         """Initialize the provider with optional overrides for tests."""
 
         self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
-        self.base_url = base_url
+        self.base_url = base_url or os.getenv("ANTHROPIC_BASE_URL", DEFAULT_ANTHROPIC_BASE_URL)
         self.session = session or requests.Session()
 
     def default_model_map(self) -> dict[ModelTier, str]:
         """Return default Anthropic models for each tier."""
 
-        return {
-            ModelTier.FAST: "claude-3-5-haiku-latest",
-            ModelTier.STANDARD: "claude-3-5-sonnet-latest",
-            ModelTier.PREMIUM: "claude-opus-4-6",
-        }
+        return _resolve_model_map("ANTHROPIC", DEFAULT_ANTHROPIC_MODELS)
 
     def generate(
         self,
@@ -275,3 +277,13 @@ def _extract_error_message(payload: Any, fallback: str) -> str:
         if payload.get("message"):
             return str(payload["message"])
     return fallback
+
+
+def _resolve_model_map(prefix: str, defaults: dict[ModelTier, str]) -> dict[ModelTier, str]:
+    """Resolve one provider's model map from env vars with fallback defaults."""
+
+    return {
+        ModelTier.FAST: os.getenv(f"{prefix}_MODEL_FAST", defaults[ModelTier.FAST]),
+        ModelTier.STANDARD: os.getenv(f"{prefix}_MODEL_STANDARD", defaults[ModelTier.STANDARD]),
+        ModelTier.PREMIUM: os.getenv(f"{prefix}_MODEL_PREMIUM", defaults[ModelTier.PREMIUM]),
+    }

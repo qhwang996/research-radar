@@ -10,10 +10,13 @@ from pathlib import Path
 from typing import Any, Callable, TypeVar, cast
 
 import click
+from dotenv import load_dotenv
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from src.db.session import create_all_tables, create_database_engine, create_session_factory, get_database_url
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
