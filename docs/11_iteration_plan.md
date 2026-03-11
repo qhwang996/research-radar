@@ -120,22 +120,36 @@
 - 当前去重仍是 MVP 级别，主要依赖 title key，不包含复杂 alias mapping
 - raw 文件内容删减时，当前不会自动回收旧 artifact，需要后续补 tombstone/cleanup 机制
 
-### P2.2 LLM服务层
+### P2.2 LLM服务层 ✅ 已完成（2026-03-11）
 **依赖**：无
 **核心功能**：
-- LLMClient封装（OpenAI或Anthropic）
-- 基础缓存（文件缓存）
-- 重试机制
+- ✅ `LLMClient` 封装（provider 选择、tier -> model 映射、usage 记录）
+- ✅ OpenAI Responses API 适配器
+- ✅ Anthropic Messages API 适配器
+- ✅ 基础缓存（本地 JSON 文件缓存）
+- ✅ 重试机制（指数退避 + rate limit / timeout 重试）
 
 **可选功能**：
-- 多模型支持
+- 多模型支持（目前支持通过 provider 默认映射或初始化时自定义 `model_map`）
 - 高级缓存策略
 - Token计数
 
 **验收标准**：
-- 能调用LLM生成文本
-- 相同输入返回缓存
-- 失败自动重试
+- [x] 能调用LLM生成文本
+- [x] 相同 `cache_key` 返回缓存
+- [x] 失败自动重试
+- [x] 记录 token usage 元数据
+- [x] 有单元测试覆盖 client / provider
+
+**实现亮点**：
+- provider 层与 client 层解耦，后续接 `P2.3` 时只需要注入 prompt 和 cache key
+- 直接基于 HTTP API 实现，不依赖额外 SDK，保持依赖面最小
+- 文件缓存落在 `data/cache/llm/`，便于回放和排查
+- OpenAI / Anthropic 的错误处理统一归一到 retryable / non-retryable 语义
+
+**已知问题**：
+- 当前只完成 live API 协议适配和 mocked 测试，尚未用真实 API key 做端到端验证
+- 暂未实现 TTL、缓存失效策略和成本统计聚合报表
 
 ### P2.3 Enrichment Pipeline
 **依赖**：P0.1, P2.2

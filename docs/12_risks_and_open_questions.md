@@ -225,6 +225,26 @@
 
 ---
 
+### R4.2: LLM provider live 调用尚未用真实凭证验证
+
+**风险描述**：
+- P2.2 已实现 OpenAI / Anthropic 的 HTTP 适配器、缓存和重试逻辑
+- 但仓库和测试环境中未提供真实 `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`
+- 因此目前只能通过 mocked HTTP 响应验证协议兼容性，尚未确认真实账号、配额、模型可用性和限流行为
+
+**已观察到的问题（2026-03-11）**：
+- 单元测试已覆盖 payload 结构、响应解析、缓存命中和 retry 语义
+- 但没有 live sandbox 或测试凭证可用于端到端调用
+
+**缓解措施**：
+1. 在实际接入 `P2.3 Enrichment Pipeline` 前，使用低成本模型和单条 prompt 做 smoke test
+2. 把 provider、model、timeout 和 cache key 打到日志中，便于 live 调试
+3. 生产使用前配置 API budget cap 和最小额度告警，避免错误重试造成额外消耗
+
+**当前状态**：已识别，待真实凭证验证
+
+---
+
 ## 产品风险
 
 ### R5: 输出质量不符合预期
