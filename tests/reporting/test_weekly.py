@@ -33,8 +33,8 @@ class WeeklyReportGeneratorTestCase(unittest.TestCase):
         self.generator = WeeklyReportGenerator(
             session_factory=self.session_factory,
             output_dir=self.output_dir,
+            now_fn=lambda: datetime(2026, 3, 10, 18, 0, tzinfo=timezone.utc),
         )
-        self.generator._current_time = lambda: datetime(2026, 3, 10, 18, 0, tzinfo=timezone.utc)  # type: ignore[method-assign]
         self.target_date = date(2026, 3, 10)
         self.week_start = datetime(2026, 3, 9, 0, 0, tzinfo=timezone.utc)
 

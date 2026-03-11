@@ -9,7 +9,7 @@ import time
 from typing import Callable
 
 from src.exceptions import LLMError
-from src.llm.base import LLMProvider, LLMProviderError, LLMUsage, ModelTier
+from src.llm.base import LLMProvider, LLMProviderError, LLMUsage, ModelTier, safe_int
 from src.llm.cache import FileLLMCache
 from src.llm.providers import AnthropicProvider, OpenAIProvider
 
@@ -135,16 +135,7 @@ def _usage_from_metadata(metadata: dict[str, object]) -> dict[str, int | None]:
     if not isinstance(usage_payload, dict):
         return {}
     return {
-        "input_tokens": _safe_int(usage_payload.get("input_tokens")),
-        "output_tokens": _safe_int(usage_payload.get("output_tokens")),
-        "total_tokens": _safe_int(usage_payload.get("total_tokens")),
+        "input_tokens": safe_int(usage_payload.get("input_tokens")),
+        "output_tokens": safe_int(usage_payload.get("output_tokens")),
+        "total_tokens": safe_int(usage_payload.get("total_tokens")),
     }
-
-
-def _safe_int(value: object) -> int | None:
-    """Best-effort integer parsing for cached usage payloads."""
-
-    try:
-        return int(value) if value is not None else None
-    except (TypeError, ValueError):
-        return None

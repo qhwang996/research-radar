@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections import Counter
 from datetime import date, datetime, time, timedelta, timezone
 import logging
 from pathlib import Path
+from typing import Callable
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -26,11 +28,13 @@ class BaseReportGenerator(ABC):
         *,
         session_factory: sessionmaker[Session] | None = None,
         output_dir: Path | None = None,
+        now_fn: Callable[[], datetime] | None = None,
     ) -> None:
         """Initialize shared generator dependencies."""
 
         self.session_factory = session_factory or SessionLocal
         self.output_dir = (output_dir or Path("data/reports")).resolve()
+        self.now_fn = now_fn or self._default_now
 
     @abstractmethod
     def generate(self, target_date: date) -> Path:
@@ -43,7 +47,12 @@ class BaseReportGenerator(ABC):
     def _current_time(self) -> datetime:
         """Return the current UTC time truncated to minutes for stable output."""
 
-        return datetime.now(timezone.utc).replace(second=0, microsecond=0)
+        return self.now_fn().replace(second=0, microsecond=0)
+
+    def _default_now(self) -> datetime:
+        """Return the current UTC timestamp."""
+
+        return datetime.now(timezone.utc)
 
     def _day_range(self, target_date: date) -> tuple[datetime, datetime]:
         """Return the UTC range covering one calendar day."""
@@ -108,3 +117,20 @@ class BaseReportGenerator(ABC):
         path.write_text(content, encoding="utf-8")
         logger.info("Wrote report to %s", path)
         return path
+
+    def _build_source_breakdown(self, artifacts: list[Artifact]) -> dict[str, int]:
+        """Compute shared source-type statistics used by daily and weekly reports."""
+
+        counts = Counter(getattr(artifact.source_type, "value", str(artifact.source_type)) for artifact in artifacts)
+        top_tier_papers = sum(
+            1
+            for artifact in artifacts
+            if getattr(artifact.source_type, "value", str(artifact.source_type)) == "papers"
+            and artifact.source_tier == "top-tier"
+        )
+        return {
+            "papers": counts.get("papers", 0),
+            "blogs": counts.get("blogs", 0),
+            "advisories": counts.get("advisories", 0),
+            "top_tier_papers": top_tier_papers,
+        }

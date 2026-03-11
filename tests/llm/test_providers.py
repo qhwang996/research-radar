@@ -97,6 +97,7 @@ class OpenAIProviderTestCase(unittest.TestCase):
         self.assertIn(ModelTier.FAST, model_map)
         self.assertIn(ModelTier.STANDARD, model_map)
         self.assertIn(ModelTier.PREMIUM, model_map)
+        self.assertEqual(model_map[ModelTier.PREMIUM], "gpt-4.1")
 
 
 class AnthropicProviderTestCase(unittest.TestCase):
@@ -142,3 +143,10 @@ class AnthropicProviderTestCase(unittest.TestCase):
         )
         self.assertEqual(session.calls[0]["json"]["max_tokens"], 300)
         self.assertEqual(session.calls[0]["timeout"], 15.0)
+
+    def test_default_model_map_uses_latest_premium_alias(self) -> None:
+        """The Anthropic provider should default PREMIUM to the latest alias."""
+
+        provider = AnthropicProvider(api_key="anthropic-key", session=FakeSession([]))
+
+        self.assertEqual(provider.default_model_map()[ModelTier.PREMIUM], "claude-opus-4-6")

@@ -7,7 +7,7 @@ from typing import Any
 
 import requests
 
-from src.llm.base import LLMProvider, LLMProviderError, LLMResponse, LLMUsage, ModelTier
+from src.llm.base import LLMProvider, LLMProviderError, LLMResponse, LLMUsage, ModelTier, safe_int
 
 
 OPENAI_RESPONSE_URL = "https://api.openai.com/v1/responses"
@@ -112,9 +112,9 @@ class OpenAIProvider(LLMProvider):
 
         if not isinstance(usage_payload, dict):
             return LLMUsage()
-        input_tokens = _safe_int(usage_payload.get("input_tokens"))
-        output_tokens = _safe_int(usage_payload.get("output_tokens"))
-        total_tokens = _safe_int(usage_payload.get("total_tokens"))
+        input_tokens = safe_int(usage_payload.get("input_tokens"))
+        output_tokens = safe_int(usage_payload.get("output_tokens"))
+        total_tokens = safe_int(usage_payload.get("total_tokens"))
         if total_tokens is None and input_tokens is not None and output_tokens is not None:
             total_tokens = input_tokens + output_tokens
         return LLMUsage(
@@ -148,7 +148,7 @@ class AnthropicProvider(LLMProvider):
         return {
             ModelTier.FAST: "claude-3-5-haiku-latest",
             ModelTier.STANDARD: "claude-3-5-sonnet-latest",
-            ModelTier.PREMIUM: "claude-opus-4-1-20250805",
+            ModelTier.PREMIUM: "claude-opus-4-6",
         }
 
     def generate(
@@ -220,8 +220,8 @@ class AnthropicProvider(LLMProvider):
 
         if not isinstance(usage_payload, dict):
             return LLMUsage()
-        input_tokens = _safe_int(usage_payload.get("input_tokens"))
-        output_tokens = _safe_int(usage_payload.get("output_tokens"))
+        input_tokens = safe_int(usage_payload.get("input_tokens"))
+        output_tokens = safe_int(usage_payload.get("output_tokens"))
         total_tokens = None
         if input_tokens is not None and output_tokens is not None:
             total_tokens = input_tokens + output_tokens
@@ -275,12 +275,3 @@ def _extract_error_message(payload: Any, fallback: str) -> str:
         if payload.get("message"):
             return str(payload["message"])
     return fallback
-
-
-def _safe_int(value: Any) -> int | None:
-    """Best-effort integer parsing for usage fields."""
-
-    try:
-        return int(value) if value is not None else None
-    except (TypeError, ValueError):
-        return None

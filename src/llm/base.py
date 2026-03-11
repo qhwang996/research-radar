@@ -63,3 +63,12 @@ class LLMProvider(ABC):
         timeout: float,
     ) -> LLMResponse:
         """Send one generation request and return normalized text output."""
+
+
+def safe_int(value: object) -> int | None:
+    """Best-effort integer parsing shared by client and provider layers."""
+
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None

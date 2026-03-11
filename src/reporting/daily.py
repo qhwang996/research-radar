@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import Counter
 from datetime import date
 from pathlib import Path
 
@@ -29,7 +28,7 @@ class DailyReportGenerator(BaseReportGenerator):
             "included": included,
             "high_value": high_value,
             "medium_value": medium_value,
-            "stats": self._build_stats(included),
+            "stats": self._build_source_breakdown(included),
         }
 
         return self._write_report("daily", f"{target_date.isoformat()}.md", self.render(context))
@@ -131,20 +130,3 @@ class DailyReportGenerator(BaseReportGenerator):
             ]
         )
         return "\n".join(lines)
-
-    def _build_stats(self, artifacts: list[Artifact]) -> dict[str, int]:
-        """Compute summary statistics for included daily artifacts."""
-
-        counts = Counter(getattr(artifact.source_type, "value", str(artifact.source_type)) for artifact in artifacts)
-        top_tier_papers = sum(
-            1
-            for artifact in artifacts
-            if getattr(artifact.source_type, "value", str(artifact.source_type)) == "papers"
-            and artifact.source_tier == "top-tier"
-        )
-        return {
-            "papers": counts.get("papers", 0),
-            "blogs": counts.get("blogs", 0),
-            "advisories": counts.get("advisories", 0),
-            "top_tier_papers": top_tier_papers,
-        }

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections import Counter, defaultdict
+from collections import defaultdict
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -31,7 +31,7 @@ class WeeklyReportGenerator(BaseReportGenerator):
             "generated_at": self._current_time(),
             "artifacts": artifacts,
             "top_artifacts": artifacts[:10],
-            "content_breakdown": self._build_content_breakdown(artifacts),
+            "content_breakdown": self._build_source_breakdown(artifacts),
             "score_distribution": self._build_score_distribution(artifacts),
             "grouped_artifacts": self._group_by_source_type(artifacts),
         }
@@ -149,23 +149,6 @@ class WeeklyReportGenerator(BaseReportGenerator):
                 )
 
         return "\n".join(lines)
-
-    def _build_content_breakdown(self, artifacts: list[Artifact]) -> dict[str, int]:
-        """Compute source-type counts for the weekly summary."""
-
-        counts = Counter(getattr(artifact.source_type, "value", str(artifact.source_type)) for artifact in artifacts)
-        top_tier_papers = sum(
-            1
-            for artifact in artifacts
-            if getattr(artifact.source_type, "value", str(artifact.source_type)) == "papers"
-            and artifact.source_tier == "top-tier"
-        )
-        return {
-            "papers": counts.get("papers", 0),
-            "blogs": counts.get("blogs", 0),
-            "advisories": counts.get("advisories", 0),
-            "top_tier_papers": top_tier_papers,
-        }
 
     def _build_score_distribution(self, artifacts: list[Artifact]) -> dict[str, int]:
         """Compute summary and bucketed score distribution."""
