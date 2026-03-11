@@ -269,39 +269,66 @@
 
 ## Priority 5: 反馈系统（核心流程第五步）
 
-### P5.1 Feedback Collector
+### P5.1 Feedback Collector ✅ 已完成（2026-03-11）
 **依赖**：P0.1
 **核心功能**：
-- CLI命令收集反馈
-- 保存FeedbackEvent到数据库
+- ✅ FeedbackCollector 服务
+- ✅ `feedback` CLI 命令收集 artifact 级反馈
+- ✅ 保存 append-only `FeedbackEvent` 到数据库
+- ✅ 支持 `like / dislike / note`
 
 **可选功能**：
 - ProfileUpdater（自动学习偏好）- 可以Phase 1手动更新Profile
 - 复杂的偏好建模 - Phase 2
 
 **验收标准**：
-- 能对artifact提供反馈
-- 反馈保存到数据库
+- [x] 能对 artifact 提供反馈
+- [x] 反馈保存到数据库
+- [x] `note` 类型校验 `--note`
+- [x] 同一 artifact 的多次反馈 append-only 持久化
+
+**实现亮点**：
+- feedback 业务逻辑从 CLI 中拆到 `src/feedback/collector.py`，后续可复用到 UI 或自动化
+- 反馈内容统一存成 `{"type": ..., "note": ...}` 结构，便于后续 profile 学习
+- CLI 测试覆盖 like / dislike / note / invalid artifact / append-only 行为
+
+**已知问题**：
+- 当前只支持 artifact 级反馈，theme / direction 反馈仍 deferred
+- Phase 1 收集的反馈不影响评分，feedback multiplier 仍在 Phase 2
 
 ---
 
 ## Priority 6: CLI和自动化（让系统可用）
 
-### P6.1 CLI工具
+### P6.1 CLI工具 ✅ 已完成（2026-03-11）
 **依赖**：P1-P5
 **核心功能**：
-- `crawl` 命令：运行爬虫
-- `process` 命令：处理数据（normalize + enrich + score）
-- `report` 命令：生成报告
-- `feedback` 命令：收集反馈
+- ✅ `crawl` 命令：运行 paper / blog crawlers
+- ✅ `normalize` 命令：处理 raw JSON
+- ✅ `enrich` 命令：生成摘要和 tags
+- ✅ `score` 命令：批量评分
+- ✅ `report` 命令：生成 daily / weekly 报告
+- ✅ `feedback` 命令：收集反馈
+- ✅ `run` 命令：串联 normalize → enrich → score → report
 
 **可选功能**：
 - 更多子命令
 - 交互式CLI
 
 **验收标准**：
-- 能通过CLI运行完整流程
-- 命令有帮助文档
+- [x] 能通过 CLI 运行完整流程
+- [x] 命令有帮助文档
+- [x] 支持 `python -m src.cli` / `python -m src.cli.main`
+- [x] 有 CLI 集成测试
+
+**实现亮点**：
+- 顶层 CLI 支持 `--database-url` 和 `--verbose`，便于测试隔离和本地调试
+- `run` 命令直接复用现有 normalize / enrich / score / report 模块，没有新增 orchestration 状态
+- `click.testing.CliRunner` 覆盖了 report、feedback、run 三条关键路径
+
+**已知问题**：
+- `crawl` 命令仍依赖 live 网络和站点稳定性，当前只通过现有 parser 测试保证解析逻辑
+- `run` 命令在真实环境中仍依赖有效 LLM 凭证和网络；测试里使用 mock LLM 替代
 
 ### P6.2 调度器（可选）
 **依赖**：P6.1

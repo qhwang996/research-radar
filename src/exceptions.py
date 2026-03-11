@@ -19,3 +19,7 @@ class LLMError(ResearchRadarError):
 
 class DatabaseError(ResearchRadarError):
     """Raised when a database operation fails."""
+
+
+class FeedbackError(ResearchRadarError):
+    """Raised when feedback collection fails."""

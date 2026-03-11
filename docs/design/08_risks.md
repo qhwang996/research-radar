@@ -70,6 +70,19 @@
 
 ---
 
+### R4.2: CLI `run` 命令在真实环境依赖网络和凭证
+
+**风险**：`run` 会串联 crawl → normalize → enrich → score → report。真实执行时既依赖 crawler 网络访问，也依赖 LLM provider 凭证。
+
+**缓解**：
+- 本地开发和测试优先使用 `--skip-crawl`
+- CLI 集成测试里对 enrichment 使用 mock LLM
+- live 使用前先分别 smoke test `crawl` 和 `enrich`
+
+**状态**：Phase 1 接受
+
+---
+
 ## 开放问题
 
 ### Q1: 主题提取策略
