@@ -11,7 +11,7 @@ from typing import Callable
 from src.exceptions import LLMError
 from src.llm.base import LLMProvider, LLMProviderError, LLMUsage, ModelTier, safe_int
 from src.llm.cache import FileLLMCache
-from src.llm.providers import AnthropicProvider, OpenAIProvider
+from src.llm.providers import AnthropicProvider, GeminiProvider, OpenAIProvider
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +117,8 @@ class LLMClient:
             return OpenAIProvider()
         if normalized == "anthropic":
             return AnthropicProvider()
+        if normalized == "gemini":
+            return GeminiProvider()
         raise LLMError(f"Unsupported LLM provider: {provider}")
 
     def _resolve_model(self, model_tier: ModelTier) -> str:

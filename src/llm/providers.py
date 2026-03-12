@@ -12,6 +12,7 @@ from src.llm.base import LLMProvider, LLMProviderError, LLMResponse, LLMUsage, M
 
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1/responses"
 DEFAULT_ANTHROPIC_BASE_URL = "https://api.anthropic.com/v1/messages"
+DEFAULT_GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 DEFAULT_OPENAI_MODELS = {
     ModelTier.FAST: "gpt-4o-mini",
     ModelTier.STANDARD: "gpt-5.2",
@@ -21,6 +22,11 @@ DEFAULT_ANTHROPIC_MODELS = {
     ModelTier.FAST: "claude-haiku-4-5-20251001",
     ModelTier.STANDARD: "claude-sonnet-4-6",
     ModelTier.PREMIUM: "claude-opus-4-6",
+}
+DEFAULT_GEMINI_MODELS = {
+    ModelTier.FAST: "gemini-2.5-flash",
+    ModelTier.STANDARD: "gemini-2.5-pro",
+    ModelTier.PREMIUM: "gemini-3-pro-preview",
 }
 
 
@@ -234,6 +240,137 @@ class AnthropicProvider(LLMProvider):
         )
 
 
+class GeminiProvider(LLMProvider):
+    """HTTP adapter for the Gemini generateContent API."""
+
+    provider_name = "gemini"
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        session: requests.Session | Any | None = None,
+    ) -> None:
+        """Initialize the provider with optional overrides for tests."""
+
+        self.api_key = api_key or _resolve_api_key(
+            "GEMINI_API_KEY",
+            "GOOGLE_API_KEY",
+            "SSS_API_KEY",
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+        )
+        self.base_url = base_url or os.getenv("GEMINI_BASE_URL", DEFAULT_GEMINI_BASE_URL)
+        self.session = session or requests.Session()
+
+    def default_model_map(self) -> dict[ModelTier, str]:
+        """Return default Gemini models for each tier."""
+
+        return _resolve_model_map("GEMINI", DEFAULT_GEMINI_MODELS)
+
+    def generate(
+        self,
+        *,
+        prompt: str,
+        model: str,
+        max_tokens: int,
+        temperature: float,
+        timeout: float,
+    ) -> LLMResponse:
+        """Send one request to Gemini and normalize the response payload."""
+
+        self._require_api_key()
+        payload = {
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [{"text": prompt}],
+                }
+            ],
+            "generationConfig": {
+                "temperature": temperature,
+                "maxOutputTokens": max_tokens,
+            },
+        }
+        headers = {
+            "x-goog-api-key": self.api_key,
+            "content-type": "application/json",
+        }
+        url = f"{self.base_url.rstrip('/')}/{model}:generateContent"
+        data = self._post_json(url=url, headers=headers, payload=payload, timeout=timeout)
+        text = self._extract_gemini_text(data)
+        usage = self._parse_usage(data.get("usageMetadata"))
+        return LLMResponse(text=text, model=model, usage=usage)
+
+    def _require_api_key(self) -> None:
+        """Raise a provider error if the API key is missing."""
+
+        if not self.api_key:
+            raise LLMProviderError("Missing GEMINI_API_KEY", retryable=False)
+
+    def _post_json(
+        self,
+        *,
+        url: str,
+        headers: dict[str, str],
+        payload: dict[str, Any],
+        timeout: float,
+    ) -> dict[str, Any]:
+        """POST JSON to Gemini and return a parsed JSON object."""
+
+        try:
+            response = self.session.post(
+                url,
+                headers=headers,
+                json=payload,
+                timeout=timeout,
+            )
+        except requests.Timeout as exc:
+            raise LLMProviderError("Gemini request timed out", retryable=True) from exc
+        except requests.RequestException as exc:
+            raise LLMProviderError(f"Gemini request failed: {exc}", retryable=True) from exc
+
+        return _handle_response(response, provider_name=self.provider_name)
+
+    def _extract_gemini_text(self, payload: dict[str, Any]) -> str:
+        """Extract concatenated text parts from the first Gemini candidate."""
+
+        candidates = payload.get("candidates", [])
+        if not isinstance(candidates, list) or not candidates:
+            raise LLMProviderError("Gemini response missing candidates", retryable=False)
+
+        content = candidates[0].get("content", {})
+        if not isinstance(content, dict):
+            raise LLMProviderError("Gemini response missing candidate content", retryable=False)
+
+        parts = content.get("parts", [])
+        if not isinstance(parts, list):
+            raise LLMProviderError("Gemini response missing content parts", retryable=False)
+
+        texts = [str(part.get("text", "")) for part in parts if isinstance(part, dict) and part.get("text")]
+        text = "".join(texts).strip()
+        if not text:
+            raise LLMProviderError("Gemini response missing text content", retryable=False)
+        return text
+
+    def _parse_usage(self, usage_payload: Any) -> LLMUsage:
+        """Normalize token usage fields from the Gemini response."""
+
+        if not isinstance(usage_payload, dict):
+            return LLMUsage()
+        input_tokens = safe_int(usage_payload.get("promptTokenCount"))
+        output_tokens = safe_int(usage_payload.get("candidatesTokenCount"))
+        total_tokens = safe_int(usage_payload.get("totalTokenCount"))
+        if total_tokens is None and input_tokens is not None and output_tokens is not None:
+            total_tokens = input_tokens + output_tokens
+        return LLMUsage(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=total_tokens,
+        )
+
+
 def _handle_response(response: Any, *, provider_name: str) -> dict[str, Any]:
     """Normalize one provider HTTP response or raise a retry-aware error."""
 
@@ -287,3 +424,13 @@ def _resolve_model_map(prefix: str, defaults: dict[ModelTier, str]) -> dict[Mode
         ModelTier.STANDARD: os.getenv(f"{prefix}_MODEL_STANDARD", defaults[ModelTier.STANDARD]),
         ModelTier.PREMIUM: os.getenv(f"{prefix}_MODEL_PREMIUM", defaults[ModelTier.PREMIUM]),
     }
+
+
+def _resolve_api_key(*env_vars: str) -> str | None:
+    """Return the first non-empty API key from one list of env vars."""
+
+    for env_var in env_vars:
+        value = os.getenv(env_var)
+        if value:
+            return value
+    return None

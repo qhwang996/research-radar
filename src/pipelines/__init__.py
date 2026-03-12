@@ -2,6 +2,7 @@
 
 from src.pipelines.base import BasePipeline
 from src.pipelines.enrichment import EnrichmentPipeline
+from src.pipelines.llm_relevance import LLMRelevancePipeline
 from src.pipelines.normalization import NormalizationPipeline
 
-__all__ = ["BasePipeline", "EnrichmentPipeline", "NormalizationPipeline"]
+__all__ = ["BasePipeline", "EnrichmentPipeline", "LLMRelevancePipeline", "NormalizationPipeline"]

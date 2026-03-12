@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -26,6 +27,7 @@ class StubLLMClient:
 
         self.responses = list(responses)
         self.calls: list[dict[str, object]] = []
+        self.lock = threading.Lock()
 
     def generate(
         self,
@@ -37,18 +39,19 @@ class StubLLMClient:
     ) -> str:
         """Return the next queued response or raise the next queued error."""
 
-        self.calls.append(
-            {
-                "prompt": prompt,
-                "model_tier": model_tier,
-                "max_tokens": max_tokens,
-                "temperature": temperature,
-                "cache_key": cache_key,
-            }
-        )
-        if not self.responses:
-            raise AssertionError("No queued response in StubLLMClient")
-        response = self.responses.pop(0)
+        with self.lock:
+            self.calls.append(
+                {
+                    "prompt": prompt,
+                    "model_tier": model_tier,
+                    "max_tokens": max_tokens,
+                    "temperature": temperature,
+                    "cache_key": cache_key,
+                }
+            )
+            if not self.responses:
+                raise AssertionError("No queued response in StubLLMClient")
+            response = self.responses.pop(0)
         if isinstance(response, Exception):
             raise response
         return str(response)
@@ -216,6 +219,70 @@ class EnrichmentPipelineTestCase(unittest.TestCase):
             enriched[0].tags,
             ["eosio-smart-contracts", "static-analysis", "blockchain-security"],
         )
+
+    def test_parallel_processing(self) -> None:
+        """Parallel enrichment should process multiple artifacts successfully."""
+
+        llm_client = StubLLMClient(
+            ['{"summary_l1": "Parallel summary.", "tags": ["parallel-test", "web-security", "analysis"]}'] * 4
+        )
+        pipeline = EnrichmentPipeline(
+            session_factory=self.session_factory,
+            llm_client=llm_client,
+            prompt_template_path=self.workspace / "prompt.md",
+            max_workers=2,
+        )
+        (self.workspace / "prompt.md").write_text("{{artifact_context}}", encoding="utf-8")
+        artifact_ids = [self._save_artifact(title=f"Artifact {index}").id for index in range(4)]
+
+        enriched = pipeline.process(artifact_ids)
+
+        self.assertEqual(len(enriched), 4)
+        self.assertEqual(len(llm_client.calls), 4)
+
+        session: Session = self.session_factory()
+        try:
+            repository = ArtifactRepository(session)
+            summaries = [repository.get_by_id(artifact_id).summary_l1 for artifact_id in artifact_ids]
+            self.assertEqual(summaries.count("Parallel summary."), 4)
+        finally:
+            session.close()
+
+    def test_parallel_failure_isolation(self) -> None:
+        """One parallel worker failure should not block the rest."""
+
+        llm_client = StubLLMClient(
+            [
+                LLMError("temporary failure"),
+                '{"summary_l1": "Recovered summary.", "tags": ["parallel-test", "recovery", "analysis"]}',
+                '{"summary_l1": "Recovered summary.", "tags": ["parallel-test", "recovery", "analysis"]}',
+                '{"summary_l1": "Recovered summary.", "tags": ["parallel-test", "recovery", "analysis"]}',
+            ]
+        )
+        pipeline = EnrichmentPipeline(
+            session_factory=self.session_factory,
+            llm_client=llm_client,
+            prompt_template_path=self.workspace / "prompt.md",
+            max_workers=2,
+        )
+        (self.workspace / "prompt.md").write_text("{{artifact_context}}", encoding="utf-8")
+        artifact_ids = [self._save_artifact(title=f"Failure Artifact {index}").id for index in range(4)]
+
+        enriched = pipeline.process(artifact_ids)
+
+        self.assertEqual(len(enriched), 3)
+        self.assertEqual(len(llm_client.calls), 4)
+
+        session: Session = self.session_factory()
+        try:
+            repository = ArtifactRepository(session)
+            persisted = [repository.get_by_id(artifact_id) for artifact_id in artifact_ids]
+            enriched_count = sum(1 for artifact in persisted if artifact.summary_l1 == "Recovered summary.")
+            missing_count = sum(1 for artifact in persisted if artifact.summary_l1 is None)
+            self.assertEqual(enriched_count, 3)
+            self.assertEqual(missing_count, 1)
+        finally:
+            session.close()
 
     def _save_artifact(self, **kwargs) -> Artifact:
         """Persist one artifact with sensible defaults."""

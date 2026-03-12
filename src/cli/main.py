@@ -100,13 +100,18 @@ def cli(ctx: click.Context, database_url: str | None, verbose: bool) -> None:
 
 from src.cli.crawl import crawl_command  # noqa: E402
 from src.cli.feedback import feedback_command  # noqa: E402
-from src.cli.process import enrich_command, normalize_command, run_command, score_command  # noqa: E402
+from src.cli.maintenance import cleanup_ccs_command  # noqa: E402
+from src.cli.profile import profile_command  # noqa: E402
+from src.cli.process import enrich_command, llm_relevance_command, normalize_command, run_command, score_command  # noqa: E402
 from src.cli.report import report_command  # noqa: E402
 
 cli.add_command(crawl_command)
+cli.add_command(cleanup_ccs_command)
 cli.add_command(normalize_command)
 cli.add_command(enrich_command)
+cli.add_command(llm_relevance_command)
 cli.add_command(score_command)
 cli.add_command(report_command)
 cli.add_command(feedback_command)
+cli.add_command(profile_command)
 cli.add_command(run_command)

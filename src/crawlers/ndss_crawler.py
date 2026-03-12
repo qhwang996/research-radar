@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import re
+import time
 from typing import Any
 
 from bs4 import BeautifulSoup
@@ -17,6 +19,7 @@ class NDSSCrawler(PaperCrawler):
 
     source_name = "NDSS"
     source_slug = "ndss"
+    detail_request_delay_seconds = 0.5
 
     def build_year_url(self, year: int) -> str:
         """Return the accepted papers URL for an NDSS year."""
@@ -59,23 +62,64 @@ class NDSSCrawler(PaperCrawler):
             author_node = entry.select_one("div.pt-cv-ctf-value p")
             author_text = clean_text(author_node.get_text(" ", strip=True)) if author_node else ""
             authors = split_authors(author_text)
-
-            papers.append(
-                {
-                    "title": title,
-                    "authors": authors,
-                    "year": year,
-                    "conference": f"NDSS {year}",
-                    "source_url": source_url,
-                    "paper_url": self.to_absolute_url(
-                        source_url,
-                        title_link.get("href") if title_link else None,
-                    ),
-                    "abstract": None,
-                    "pdf_url": None,
-                    "data_completeness": "with_authors" if authors else "title_only",
-                    "source_type": "papers",
-                }
+            paper_url = self.to_absolute_url(
+                source_url,
+                title_link.get("href") if title_link else None,
             )
 
+            paper = {
+                "title": title,
+                "authors": authors,
+                "year": year,
+                "conference": f"NDSS {year}",
+                "source_url": source_url,
+                "paper_url": paper_url,
+                "abstract": None,
+                "pdf_url": None,
+                "data_completeness": "with_authors" if authors else "title_only",
+                "source_type": "papers",
+            }
+            if paper_url:
+                paper["abstract"] = self._fetch_detail_abstract(paper_url)
+            papers.append(paper)
+
         return papers
+
+    def _fetch_detail_abstract(self, paper_url: str) -> str | None:
+        """Fetch one paper detail page and extract the abstract when available."""
+
+        try:
+            detail_html = self.fetch_url(paper_url)
+            return self._extract_abstract(detail_html)
+        except Exception as exc:  # pragma: no cover - exercised through parser flow tests
+            logger.warning("Failed to fetch NDSS paper detail %s: %s", paper_url, exc)
+            return None
+        finally:
+            self._sleep_between_detail_requests()
+
+    def _extract_abstract(self, html: str) -> str | None:
+        """Extract one abstract string from an NDSS paper detail page."""
+
+        soup = BeautifulSoup(html, "html.parser")
+        paragraphs: list[str] = []
+        for container in soup.select("div.entry-content, div.paper-data"):
+            paragraphs.extend(
+                clean_text(paragraph.get_text(" ", strip=True))
+                for paragraph in container.select("p")
+                if clean_text(paragraph.get_text(" ", strip=True))
+            )
+
+        if not paragraphs:
+            return None
+
+        for paragraph in paragraphs:
+            normalized = re.sub(r"^abstract\s*[:\-]\s*", "", paragraph, flags=re.IGNORECASE)
+            if normalized != paragraph:
+                return normalized
+        return max(paragraphs, key=len)
+
+    def _sleep_between_detail_requests(self) -> None:
+        """Pause briefly between detail-page requests to reduce crawler pressure."""
+
+        if self.detail_request_delay_seconds > 0:
+            time.sleep(self.detail_request_delay_seconds)

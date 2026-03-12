@@ -6,6 +6,7 @@ from src.models.artifact import Artifact
 from src.models.profile import Profile
 from src.scoring.authority import AuthorityStrategy
 from src.scoring.base import BaseScoringStrategy
+from src.scoring.relevance import RelevanceStrategy
 from src.scoring.recency import RecencyStrategy
 
 
@@ -17,15 +18,19 @@ class CompositeStrategy(BaseScoringStrategy):
         *,
         recency_strategy: BaseScoringStrategy | None = None,
         authority_strategy: BaseScoringStrategy | None = None,
-        recency_weight: float = 0.5,
-        authority_weight: float = 0.5,
+        relevance_strategy: BaseScoringStrategy | None = None,
+        recency_weight: float = 0.4,
+        authority_weight: float = 0.3,
+        relevance_weight: float = 0.3,
     ) -> None:
         """Initialize the weighted composite strategy."""
 
         self.recency_strategy = recency_strategy or RecencyStrategy()
         self.authority_strategy = authority_strategy or AuthorityStrategy()
+        self.relevance_strategy = relevance_strategy or RelevanceStrategy()
         self.recency_weight = recency_weight
         self.authority_weight = authority_weight
+        self.relevance_weight = relevance_weight
 
     def calculate_score(self, artifact: Artifact, profile: Profile | None = None) -> float:
         """Return the weighted Phase 1 final score."""
@@ -37,21 +42,26 @@ class CompositeStrategy(BaseScoringStrategy):
 
         recency_score = self.recency_strategy.calculate_score(artifact, profile)
         authority_score = self.authority_strategy.calculate_score(artifact, profile)
-        total_weight = self.recency_weight + self.authority_weight
+        relevance_score = self.relevance_strategy.calculate_score(artifact, profile)
+        total_weight = self.recency_weight + self.authority_weight + self.relevance_weight
         final_score = (
-            (recency_score * self.recency_weight) + (authority_score * self.authority_weight)
+            (recency_score * self.recency_weight)
+            + (authority_score * self.authority_weight)
+            + (relevance_score * self.relevance_weight)
         ) / total_weight
 
         return {
             "recency_score": recency_score,
             "authority_score": authority_score,
+            "relevance_score": relevance_score,
             "final_score": self._clamp_score(final_score),
             "weights": {
                 "recency": self.recency_weight,
                 "authority": self.authority_weight,
+                "relevance": self.relevance_weight,
             },
-            "formula": "final_score = recency_score * 0.5 + authority_score * 0.5",
-            "version": "phase1-v1",
+            "formula": "final_score = recency * 0.4 + authority * 0.3 + relevance * 0.3",
+            "version": "phase2-v1",
         }
 
     def get_strategy_name(self) -> str:

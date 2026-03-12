@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 import json
 import logging
 from pathlib import Path
 import re
+from threading import local
 from typing import Any
 
 from sqlalchemy.orm import Session, sessionmaker
@@ -49,6 +51,25 @@ class EnrichmentPayload:
     tags: list[str]
 
 
+@dataclass(slots=True, frozen=True)
+class ArtifactTask:
+    """One artifact selected for enrichment work."""
+
+    order: int
+    artifact_id: int
+    title: str
+
+
+@dataclass(slots=True, frozen=True)
+class ProfileContext:
+    """Detached profile fields needed for prompt rendering."""
+
+    current_research_area: str | None
+    interests: tuple[str, ...]
+    preferred_topics: tuple[str, ...]
+    avoided_topics: tuple[str, ...]
+
+
 class EnrichmentPipeline(BasePipeline):
     """Generate L1 summaries and keyword tags for persisted artifacts."""
 
@@ -59,6 +80,7 @@ class EnrichmentPipeline(BasePipeline):
         llm_client: LLMClient | Any | None = None,
         prompt_template_path: Path | None = None,
         enrich_version: str = "v1",
+        max_workers: int = 8,
     ) -> None:
         """Initialize the enrichment pipeline dependencies."""
 
@@ -66,6 +88,8 @@ class EnrichmentPipeline(BasePipeline):
         self.llm_client = llm_client or LLMClient()
         self.prompt_template_path = prompt_template_path or Path("prompts/summarize_artifact.md")
         self.enrich_version = enrich_version
+        self.max_workers = max(1, max_workers)
+        self._thread_local = local()
 
     def process(self, input_data: Any) -> list[Artifact]:
         """Enrich target artifacts with summary_l1 and tags."""
@@ -80,46 +104,125 @@ class EnrichmentPipeline(BasePipeline):
             profile = profile_repository.get_latest_active() or profile_repository.get_latest()
             template = self._load_prompt_template()
             artifacts = self._resolve_targets(artifact_repository, input_data)
-
-            enriched: list[Artifact] = []
-            failed_count = 0
             skipped_count = 0
-
-            for artifact in artifacts:
+            profile_context = self._snapshot_profile(profile)
+            tasks: list[ArtifactTask] = []
+            for order, artifact in enumerate(artifacts):
                 if not self._needs_enrichment(artifact):
                     skipped_count += 1
                     continue
-
-                try:
-                    prompt = self._build_prompt(template, artifact, profile)
-                    response_text = self.llm_client.generate(
-                        prompt,
-                        model_tier=ModelTier.FAST,
-                        max_tokens=300,
-                        temperature=0.2,
-                        cache_key=f"enrichment_{self.enrich_version}_{artifact.canonical_id}",
-                    )
-                    payload = self._parse_enrichment_response(response_text)
-                    artifact.summary_l1 = payload.summary_l1
-                    artifact.tags = payload.tags
-                    enriched.append(artifact_repository.save(artifact))
-                except (LLMError, PipelineError, ValueError, TypeError) as exc:
-                    failed_count += 1
-                    logger.error("Failed to enrich artifact %s (%s): %s", artifact.id, artifact.title, exc)
-
-            logger.info(
-                "Enrichment complete: %s enriched, %s skipped, %s failed",
-                len(enriched),
-                skipped_count,
-                failed_count,
-            )
-
-            if not self.validate_output(enriched):
-                raise PipelineError("Invalid output from enrichment pipeline")
-
-            return enriched
+                tasks.append(ArtifactTask(order=order, artifact_id=artifact.id, title=artifact.title))
         finally:
             session.close()
+
+        enriched, failed_count = self._run_tasks(tasks, template, profile_context)
+
+        logger.info(
+            "Enrichment complete: %s enriched, %s skipped, %s failed",
+            len(enriched),
+            skipped_count,
+            failed_count,
+        )
+
+        if not self.validate_output(enriched):
+            raise PipelineError("Invalid output from enrichment pipeline")
+
+        return enriched
+
+    def _run_tasks(
+        self,
+        tasks: list[ArtifactTask],
+        template: str,
+        profile: ProfileContext | None,
+    ) -> tuple[list[Artifact], int]:
+        """Run enrichment work in parallel while preserving target order."""
+
+        if not tasks:
+            return [], 0
+
+        enriched_by_order: list[tuple[int, Artifact]] = []
+        failed_count = 0
+
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            future_to_task = {
+                executor.submit(self._enrich_one, task.artifact_id, template, profile): task
+                for task in tasks
+            }
+            for future in as_completed(future_to_task):
+                task = future_to_task[future]
+                try:
+                    artifact = future.result()
+                except Exception as exc:  # pragma: no cover - worker boundary
+                    failed_count += 1
+                    logger.error("Failed to enrich artifact %s (%s): %s", task.artifact_id, task.title, exc)
+                    continue
+                if artifact is not None:
+                    enriched_by_order.append((task.order, artifact))
+
+        enriched_by_order.sort(key=lambda item: item[0])
+        return [artifact for _, artifact in enriched_by_order], failed_count
+
+    def _enrich_one(
+        self,
+        artifact_id: int,
+        template: str,
+        profile: ProfileContext | None,
+    ) -> Artifact | None:
+        """Load, enrich, and persist one artifact in one worker thread."""
+
+        session = self.session_factory()
+        try:
+            artifact_repository = ArtifactRepository(session)
+            artifact = artifact_repository.get_by_id(artifact_id)
+            if artifact is None or not self._needs_enrichment(artifact):
+                return None
+
+            prompt = self._build_prompt(template, artifact, profile)
+            response_text = self._get_worker_llm_client().generate(
+                prompt,
+                model_tier=ModelTier.FAST,
+                max_tokens=300,
+                temperature=0.2,
+                cache_key=f"enrichment_{self.enrich_version}_{artifact.canonical_id}",
+            )
+            payload = self._parse_enrichment_response(response_text)
+            artifact.summary_l1 = payload.summary_l1
+            artifact.tags = payload.tags
+            return artifact_repository.save(artifact)
+        finally:
+            session.close()
+
+    def _get_worker_llm_client(self) -> LLMClient | Any:
+        """Return one thread-local client for real LLM calls and reuse stubs in tests."""
+
+        if not isinstance(self.llm_client, LLMClient):
+            return self.llm_client
+
+        worker_client = getattr(self._thread_local, "llm_client", None)
+        if worker_client is None:
+            worker_client = LLMClient(
+                provider=self.llm_client.provider.provider_name,
+                cache_dir=self.llm_client.cache.cache_dir,
+                timeout=self.llm_client.timeout,
+                max_retries=self.llm_client.max_retries,
+                backoff_base_seconds=self.llm_client.backoff_base_seconds,
+                sleep_fn=self.llm_client.sleep_fn,
+                model_map=dict(self.llm_client.model_map),
+            )
+            self._thread_local.llm_client = worker_client
+        return worker_client
+
+    def _snapshot_profile(self, profile: Profile | None) -> ProfileContext | None:
+        """Detach the prompt-relevant profile fields for worker-thread use."""
+
+        if profile is None:
+            return None
+        return ProfileContext(
+            current_research_area=profile.current_research_area,
+            interests=tuple(profile.interests or []),
+            preferred_topics=tuple(profile.preferred_topics or []),
+            avoided_topics=tuple(profile.avoided_topics or []),
+        )
 
     def validate_input(self, data: Any) -> bool:
         """Return whether the enrichment input is supported."""
@@ -176,7 +279,7 @@ class EnrichmentPipeline(BasePipeline):
                 return template
         return DEFAULT_PROMPT_TEMPLATE.strip()
 
-    def _build_prompt(self, template: str, artifact: Artifact, profile: Profile | None) -> str:
+    def _build_prompt(self, template: str, artifact: Artifact, profile: Profile | ProfileContext | None) -> str:
         """Render one artifact plus optional profile context into the prompt template."""
 
         artifact_context = self._build_artifact_context(artifact, profile)
@@ -184,7 +287,11 @@ class EnrichmentPipeline(BasePipeline):
             return template.replace("{{artifact_context}}", artifact_context)
         return f"{template}\n\n{artifact_context}"
 
-    def _build_artifact_context(self, artifact: Artifact, profile: Profile | None) -> str:
+    def _build_artifact_context(
+        self,
+        artifact: Artifact,
+        profile: Profile | ProfileContext | None,
+    ) -> str:
         """Build structured prompt context for one artifact."""
 
         lines = [

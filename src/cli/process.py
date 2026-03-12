@@ -12,6 +12,7 @@ from src.cli.crawl import _crawl_all_sources
 from src.cli.main import AppContext, handle_command_errors, parse_date_option, pass_app_context
 from src.llm import LLMClient
 from src.pipelines.enrichment import EnrichmentPipeline
+from src.pipelines.llm_relevance import LLMRelevancePipeline
 from src.pipelines.normalization import NormalizationPipeline
 from src.reporting.daily import DailyReportGenerator
 from src.reporting.weekly import WeeklyReportGenerator
@@ -47,19 +48,20 @@ def normalize_command(app: AppContext, input_dir: Path, recursive: bool) -> None
 @click.command("enrich")
 @click.option(
     "--provider",
-    type=click.Choice(["openai", "anthropic"], case_sensitive=False),
+    type=click.Choice(["openai", "anthropic", "gemini"], case_sensitive=False),
     default="openai",
     show_default=True,
     help="LLM provider to use for enrichment.",
 )
 @click.option("--artifact-id", type=int, default=None, help="Target a specific artifact by DB id.")
+@click.option("--workers", type=click.IntRange(1), default=8, show_default=True, help="Number of LLM worker threads.")
 @pass_app_context
 @handle_command_errors
-def enrich_command(app: AppContext, provider: str, artifact_id: int | None) -> None:
+def enrich_command(app: AppContext, provider: str, artifact_id: int | None, workers: int) -> None:
     """Generate LLM summaries and tags."""
 
     llm_client = build_llm_client(provider)
-    pipeline = EnrichmentPipeline(session_factory=app.session_factory, llm_client=llm_client)
+    pipeline = EnrichmentPipeline(session_factory=app.session_factory, llm_client=llm_client, max_workers=workers)
     enriched = pipeline.process(artifact_id)
     click.echo(f"Enriched {len(enriched)} artifacts")
 
@@ -74,11 +76,35 @@ def score_command(app: AppContext) -> None:
     click.echo(f"Scored {len(artifacts)} artifacts")
 
 
+@click.command("llm-relevance")
+@click.option(
+    "--provider",
+    type=click.Choice(["openai", "anthropic", "gemini"], case_sensitive=False),
+    default="gemini",
+    show_default=True,
+    help="LLM provider to use for relevance scoring.",
+)
+@click.option("--artifact-id", type=int, default=None, help="Target a specific artifact by DB id.")
+@click.option("--workers", type=click.IntRange(1), default=8, show_default=True, help="Number of LLM worker threads.")
+@pass_app_context
+@handle_command_errors
+def llm_relevance_command(app: AppContext, provider: str, artifact_id: int | None, workers: int) -> None:
+    """Pre-compute LLM relevance scores for persisted artifacts."""
+
+    llm_client = build_llm_client(provider)
+    artifacts = LLMRelevancePipeline(
+        session_factory=app.session_factory,
+        llm_client=llm_client,
+        max_workers=workers,
+    ).process(artifact_id)
+    click.echo(f"LLM relevance scored {len(artifacts)} artifacts")
+
+
 @click.command("run")
 @click.option("--skip-crawl", is_flag=True, help="Skip the crawl step.")
 @click.option(
     "--provider",
-    type=click.Choice(["openai", "anthropic"], case_sensitive=False),
+    type=click.Choice(["openai", "anthropic", "gemini"], case_sensitive=False),
     default="openai",
     show_default=True,
     help="LLM provider for enrichment.",
@@ -91,6 +117,7 @@ def score_command(app: AppContext) -> None:
     help="Report type to generate.",
 )
 @click.option("--date", "target_date_raw", type=str, default=None, help="Target date in YYYY-MM-DD format.")
+@click.option("--workers", type=click.IntRange(1), default=8, show_default=True, help="Number of LLM worker threads.")
 @pass_app_context
 @handle_command_errors
 def run_command(
@@ -99,6 +126,7 @@ def run_command(
     provider: str,
     report_type: str,
     target_date_raw: str | None,
+    workers: int,
 ) -> None:
     """Run normalize → enrich → score → report sequentially."""
 
@@ -114,8 +142,19 @@ def run_command(
     click.echo(f"Normalized {len(normalized)} artifact entries")
 
     llm_client = build_llm_client(provider)
-    enriched = EnrichmentPipeline(session_factory=app.session_factory, llm_client=llm_client).process(None)
+    enriched = EnrichmentPipeline(
+        session_factory=app.session_factory,
+        llm_client=llm_client,
+        max_workers=workers,
+    ).process(None)
     click.echo(f"Enriched {len(enriched)} artifacts")
+
+    llm_relevance = LLMRelevancePipeline(
+        session_factory=app.session_factory,
+        llm_client=llm_client,
+        max_workers=workers,
+    ).process(None)
+    click.echo(f"LLM relevance scored {len(llm_relevance)} artifacts")
 
     scored = ScoringEngine(session_factory=app.session_factory).score_all()
     click.echo(f"Scored {len(scored)} artifacts")

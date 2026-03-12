@@ -1,0 +1,51 @@
+{
+  "profile_version": "v1-seed",
+  "current_research_area": "Web应用安全与软件安全",
+  "interests": [
+    "Web漏洞检测",
+    "渗透测试自动化",
+    "Java安全",
+    "反序列化漏洞",
+    "供应链安全",
+    "模糊测试",
+    "程序分析",
+    "漏洞挖掘"
+  ],
+  "preferred_topics": [
+    "web-security",
+    "vulnerability-detection",
+    "fuzzing",
+    "program-analysis",
+    "binary-analysis",
+    "supply-chain-security",
+    "deserialization",
+    "java-security",
+    "penetration-testing",
+    "exploit-development",
+    "xss",
+    "sql-injection",
+    "csrf",
+    "ssrf",
+    "rce"
+  ],
+  "avoided_topics": [
+    "cryptography-theory",
+    "blockchain",
+    "formal-verification",
+    "privacy-policy",
+    "usable-security-survey",
+    "network-protocol-theory",
+    "quantum-computing"
+  ],
+  "primary_goals": [
+    "找到未来3-5年有潜力的安全研究方向",
+    "关注对工业界有实际影响的研究",
+    "关注有明确技术贡献的工作"
+  ],
+  "evaluation_criteria": {
+    "must_have": "明确的技术贡献或新攻击面",
+    "nice_to_have": "有原型实现或实际影响证据",
+    "dealbreaker": "纯理论无应用场景"
+  },
+  "is_active": true
+}

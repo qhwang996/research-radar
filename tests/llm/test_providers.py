@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import patch
 
 from src.llm.base import ModelTier
-from src.llm.providers import AnthropicProvider, OpenAIProvider
+from src.llm.providers import AnthropicProvider, GeminiProvider, OpenAIProvider
 
 
 class FakeResponse:
@@ -93,8 +93,13 @@ class OpenAIProviderTestCase(unittest.TestCase):
     def test_default_model_map_exposes_all_tiers(self) -> None:
         """The OpenAI provider should provide a model for each tier."""
 
-        provider = OpenAIProvider(api_key="test-key", base_url="https://api.openai.com/v1/responses", session=FakeSession([]))
-        model_map = provider.default_model_map()
+        with patch.dict(os.environ, {}, clear=True):
+            provider = OpenAIProvider(
+                api_key="test-key",
+                base_url="https://api.openai.com/v1/responses",
+                session=FakeSession([]),
+            )
+            model_map = provider.default_model_map()
 
         self.assertIn(ModelTier.FAST, model_map)
         self.assertIn(ModelTier.STANDARD, model_map)
@@ -175,9 +180,13 @@ class AnthropicProviderTestCase(unittest.TestCase):
     def test_default_model_map_uses_latest_premium_alias(self) -> None:
         """The Anthropic provider should default PREMIUM to the latest alias."""
 
-        provider = AnthropicProvider(api_key="anthropic-key", base_url="https://api.anthropic.com/v1/messages", session=FakeSession([]))
-
-        self.assertEqual(provider.default_model_map()[ModelTier.PREMIUM], "claude-opus-4-6")
+        with patch.dict(os.environ, {}, clear=True):
+            provider = AnthropicProvider(
+                api_key="anthropic-key",
+                base_url="https://api.anthropic.com/v1/messages",
+                session=FakeSession([]),
+            )
+            self.assertEqual(provider.default_model_map()[ModelTier.PREMIUM], "claude-opus-4-6")
 
     def test_default_model_map_allows_env_overrides(self) -> None:
         """Anthropic model defaults should be overridable via env vars."""
@@ -202,5 +211,102 @@ class AnthropicProviderTestCase(unittest.TestCase):
                     ModelTier.FAST: "thirdparty-haiku",
                     ModelTier.STANDARD: "thirdparty-sonnet",
                     ModelTier.PREMIUM: "thirdparty-opus",
+                },
+            )
+
+
+class GeminiProviderTestCase(unittest.TestCase):
+    """Tests for the Gemini HTTP adapter."""
+
+    def test_generate_posts_generate_content_payload_and_parses_text(self) -> None:
+        """The Gemini provider should speak the generateContent API contract."""
+
+        session = FakeSession(
+            [
+                FakeResponse(
+                    200,
+                    {
+                        "candidates": [
+                            {
+                                "content": {
+                                    "parts": [
+                                        {"text": "gemini reply"},
+                                    ],
+                                    "role": "model",
+                                }
+                            }
+                        ],
+                        "usageMetadata": {
+                            "promptTokenCount": 10,
+                            "candidatesTokenCount": 5,
+                            "totalTokenCount": 15,
+                        },
+                    },
+                )
+            ]
+        )
+        provider = GeminiProvider(
+            api_key="gemini-key",
+            base_url="https://generativelanguage.googleapis.com/v1beta/models",
+            session=session,
+        )
+
+        response = provider.generate(
+            prompt="Score this artifact",
+            model="gemini-2.5-pro",
+            max_tokens=128,
+            temperature=0.1,
+            timeout=12.0,
+        )
+
+        self.assertEqual(response.text, "gemini reply")
+        self.assertEqual(response.usage.total_tokens, 15)
+        self.assertEqual(
+            session.calls[0]["url"],
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent",
+        )
+        self.assertEqual(
+            session.calls[0]["json"]["contents"],
+            [{"role": "user", "parts": [{"text": "Score this artifact"}]}],
+        )
+        self.assertEqual(session.calls[0]["json"]["generationConfig"]["maxOutputTokens"], 128)
+        self.assertEqual(session.calls[0]["timeout"], 12.0)
+
+    def test_default_model_map_prefers_more_capable_standard_model(self) -> None:
+        """Gemini STANDARD should default to a more capable model than flash."""
+
+        with patch.dict(os.environ, {}, clear=True):
+            provider = GeminiProvider(
+                api_key="gemini-key",
+                base_url="https://generativelanguage.googleapis.com/v1beta/models",
+                session=FakeSession([]),
+            )
+            self.assertEqual(provider.default_model_map()[ModelTier.FAST], "gemini-2.5-flash")
+            self.assertEqual(provider.default_model_map()[ModelTier.STANDARD], "gemini-2.5-pro")
+            self.assertEqual(provider.default_model_map()[ModelTier.PREMIUM], "gemini-3-pro-preview")
+
+    def test_default_model_map_allows_env_overrides(self) -> None:
+        """Gemini model defaults should be overridable via env vars."""
+
+        with patch.dict(
+            os.environ,
+            {
+                "GEMINI_MODEL_FAST": "thirdparty-flash",
+                "GEMINI_MODEL_STANDARD": "thirdparty-pro",
+                "GEMINI_MODEL_PREMIUM": "thirdparty-ultra",
+            },
+            clear=False,
+        ):
+            provider = GeminiProvider(
+                api_key="gemini-key",
+                base_url="https://generativelanguage.googleapis.com/v1beta/models",
+                session=FakeSession([]),
+            )
+            self.assertEqual(
+                provider.default_model_map(),
+                {
+                    ModelTier.FAST: "thirdparty-flash",
+                    ModelTier.STANDARD: "thirdparty-pro",
+                    ModelTier.PREMIUM: "thirdparty-ultra",
                 },
             )

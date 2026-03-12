@@ -17,6 +17,7 @@ from src.repositories.artifact_repository import ArtifactRepository
 from src.scoring.authority import AuthorityStrategy
 from src.scoring.composite import CompositeStrategy
 from src.scoring.engine import ScoringEngine
+from src.scoring.relevance import RelevanceStrategy
 from src.scoring.recency import RecencyStrategy
 
 
@@ -71,6 +72,25 @@ class ScoringStrategyTestCase(unittest.TestCase):
 
         self.assertEqual(strategy.calculate_score(artifact), 0.95)
 
+    def test_recency_strategy_prefers_year_over_fetched_at_fallback(self) -> None:
+        """Year metadata should outrank fetch time when publish time is missing."""
+
+        strategy = RecencyStrategy(now=self.now)
+        artifact = Artifact(
+            title="Archived Paper",
+            authors=["Researcher"],
+            year=2022,
+            source_type=SourceType.PAPERS,
+            source_tier="top-tier",
+            source_name="USENIX Security",
+            source_url="https://example.com/archived-paper",
+            published_at=None,
+            fetched_at=self.now - timedelta(days=1),
+        )
+
+        self.assertEqual(strategy.calculate_score(artifact), 0.8)
+        self.assertLess(strategy.calculate_score(artifact), 1.0)
+
     def test_authority_strategy_uses_source_tier_and_name(self) -> None:
         """Authority scores should match the configured source hierarchy."""
 
@@ -104,28 +124,40 @@ class ScoringStrategyTestCase(unittest.TestCase):
         self.assertEqual(strategy.calculate_score(blog), 0.7)
         self.assertEqual(strategy.calculate_score(preprint), 0.5)
 
-    def test_composite_strategy_averages_recency_and_authority(self) -> None:
-        """Phase 1 composite score should average recency and authority."""
+    def test_composite_strategy_combines_all_three_score_components(self) -> None:
+        """Composite scoring should apply recency, authority, and relevance weights."""
 
         strategy = CompositeStrategy(
             recency_strategy=RecencyStrategy(now=self.now),
             authority_strategy=AuthorityStrategy(),
+            relevance_strategy=RelevanceStrategy(),
         )
         artifact = Artifact(
-            title="Conference",
+            title="Conference XSS Study",
             authors=["Alice"],
             source_type=SourceType.PAPERS,
             source_tier="top-tier",
             source_name="NDSS",
             source_url="https://example.com/ndss",
             published_at=self.now - timedelta(days=500),
+            abstract="A practical web security evaluation for browser defenses.",
+        )
+        profile = Profile(
+            profile_version="v1",
+            interests=["web security"],
+            preferred_topics=["xss", "web-security"],
+            avoided_topics=[],
+            is_active=True,
         )
 
-        breakdown = strategy.calculate_breakdown(artifact)
+        breakdown = strategy.calculate_breakdown(artifact, profile)
 
         self.assertEqual(breakdown["recency_score"], 0.95)
         self.assertEqual(breakdown["authority_score"], 1.0)
-        self.assertEqual(breakdown["final_score"], 0.975)
+        self.assertEqual(breakdown["relevance_score"], 0.6)
+        self.assertEqual(breakdown["final_score"], 0.86)
+        self.assertEqual(breakdown["formula"], "final_score = recency * 0.4 + authority * 0.3 + relevance * 0.3")
+        self.assertEqual(breakdown["version"], "phase2-v1")
 
 
 class ScoringEngineIntegrationTestCase(unittest.TestCase):
@@ -163,31 +195,33 @@ class ScoringEngineIntegrationTestCase(unittest.TestCase):
             repository = ArtifactRepository(session)
             recent_paper = repository.save(
                 Artifact(
-                    title="Recent Top Tier Paper",
+                    title="Recent Top Tier XSS Paper",
                     authors=["Alice"],
                     source_type=SourceType.PAPERS,
                     source_tier="top-tier",
                     source_name="USENIX Security",
                     source_url="https://example.com/recent-paper",
                     published_at=self.fixed_now - timedelta(days=120),
+                    abstract="A web security paper on XSS gadget discovery.",
                     status=ArtifactStatus.ACTIVE,
                 )
             )
             recent_blog = repository.save(
                 Artifact(
-                    title="Recent Blog",
+                    title="Recent Fuzzing Blog",
                     authors=["Researcher"],
                     source_type=SourceType.BLOGS,
                     source_tier="high-quality-blog",
                     source_name="PortSwigger Research",
                     source_url="https://example.com/recent-blog",
                     published_at=self.fixed_now - timedelta(days=20),
+                    summary_l1="A fuzzing workflow for web targets.",
                     status=ArtifactStatus.ACTIVE,
                 )
             )
             old_paper = repository.save(
                 Artifact(
-                    title="Old Paper",
+                    title="Old Blockchain Paper",
                     authors=["Alice"],
                     source_type=SourceType.PAPERS,
                     source_tier="top-tier",
@@ -201,6 +235,8 @@ class ScoringEngineIntegrationTestCase(unittest.TestCase):
                 Profile(
                     profile_version="v1",
                     interests=["web security"],
+                    preferred_topics=["xss", "web-security", "fuzzing"],
+                    avoided_topics=["blockchain"],
                     preferences={},
                     is_active=True,
                 )
@@ -221,13 +257,15 @@ class ScoringEngineIntegrationTestCase(unittest.TestCase):
         try:
             artifacts = ArtifactRepository(session).list_by_status(ArtifactStatus.ACTIVE)
             scores_by_title = {artifact.title: artifact for artifact in artifacts}
-            self.assertEqual(scores_by_title["Recent Top Tier Paper"].recency_score, 1.0)
-            self.assertEqual(scores_by_title["Recent Top Tier Paper"].authority_score, 1.0)
-            self.assertEqual(scores_by_title["Recent Top Tier Paper"].final_score, 1.0)
+            self.assertEqual(scores_by_title["Recent Top Tier XSS Paper"].recency_score, 1.0)
+            self.assertEqual(scores_by_title["Recent Top Tier XSS Paper"].authority_score, 1.0)
+            self.assertEqual(scores_by_title["Recent Top Tier XSS Paper"].relevance_score, 0.6)
+            self.assertEqual(scores_by_title["Recent Top Tier XSS Paper"].final_score, 0.88)
             self.assertEqual(
-                scores_by_title["Recent Blog"].score_breakdown["authority_score"],
+                scores_by_title["Recent Fuzzing Blog"].score_breakdown["authority_score"],
                 0.7,
             )
-            self.assertIn("weights", scores_by_title["Old Paper"].score_breakdown)
+            self.assertEqual(scores_by_title["Old Blockchain Paper"].relevance_score, 0.03)
+            self.assertIn("weights", scores_by_title["Old Blockchain Paper"].score_breakdown)
         finally:
             session.close()

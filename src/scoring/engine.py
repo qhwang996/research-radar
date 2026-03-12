@@ -66,10 +66,13 @@ class ScoringEngine:
         scored_artifacts: list[Artifact] = []
         for artifact in artifacts:
             breakdown = self.composite_strategy.calculate_breakdown(artifact, profile)
+            existing_breakdown = dict(artifact.score_breakdown or {})
+            existing_breakdown.update(breakdown)
             artifact.recency_score = float(breakdown["recency_score"])
             artifact.authority_score = float(breakdown["authority_score"])
+            artifact.relevance_score = float(breakdown["relevance_score"])
             artifact.final_score = float(breakdown["final_score"])
-            artifact.score_breakdown = dict(breakdown)
+            artifact.score_breakdown = existing_breakdown
             scored_artifacts.append(repository.save(artifact))
 
         scored_artifacts.sort(key=lambda item: (item.final_score or 0.0, item.id), reverse=True)

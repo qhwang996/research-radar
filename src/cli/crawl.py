@@ -36,7 +36,7 @@ def crawl_command(source: str | None, years: str | None, output_dir: Path) -> No
         _crawl_all_sources(year_list, target_output_dir)
         return
 
-    normalized_source = source.strip().lower()
+    normalized_source = _resolve_source_slug(source)
     if normalized_source in PAPER_CRAWLER_REGISTRY:
         crawler = PAPER_CRAWLER_REGISTRY[normalized_source]()
         items = crawler.fetch_papers(year_list)
@@ -68,6 +68,24 @@ def _parse_years(raw_years: str | None) -> list[int]:
         return list(dict.fromkeys(int(value) for value in values))
     except ValueError as exc:
         raise click.ClickException(f"Invalid year list: {raw_years}") from exc
+
+
+def _resolve_source_slug(raw_source: str) -> str:
+    """Resolve one source slug while tolerating underscore/hyphen variants."""
+
+    candidate = raw_source.strip().lower()
+    if candidate in PAPER_CRAWLER_REGISTRY or candidate in BLOG_CRAWLER_REGISTRY:
+        return candidate
+
+    hyphenated = candidate.replace("_", "-")
+    if hyphenated in PAPER_CRAWLER_REGISTRY or hyphenated in BLOG_CRAWLER_REGISTRY:
+        return hyphenated
+
+    underscored = candidate.replace("-", "_")
+    if underscored in PAPER_CRAWLER_REGISTRY or underscored in BLOG_CRAWLER_REGISTRY:
+        return underscored
+
+    return candidate
 
 
 def _crawl_all_sources(years: list[int], output_dir: Path) -> None:

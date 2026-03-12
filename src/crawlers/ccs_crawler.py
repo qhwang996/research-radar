@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from bs4 import BeautifulSoup
 
 from src.crawlers.base import PaperCrawler, clean_text
+from src.exceptions import CrawlerError
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +19,10 @@ class CCSCrawler(PaperCrawler):
 
     source_name = "ACM CCS"
     source_slug = "ccs"
+    NON_PAPER_TITLE_PATTERN = re.compile(
+        r"^(?:workshop\b|the\s+\d+(?:st|nd|rd|th)?\s+workshop\b|poster:|demo:|tutorial:|keynote:|panel:)",
+        re.IGNORECASE,
+    )
 
     def build_official_year_url(self, year: int) -> str:
         """Return the official accepted papers page for a CCS year."""
@@ -36,8 +42,15 @@ class CCSCrawler(PaperCrawler):
         papers: list[dict[str, Any]] = []
         for year in self.normalize_years(years):
             official_url = self.build_official_year_url(year)
-            html = self.fetch_url(official_url)
-            year_papers = self.parse_official_page(html, year=year, source_url=official_url)
+            year_papers: list[dict[str, Any]] = []
+            try:
+                html = self.fetch_url(official_url)
+                year_papers = self.parse_official_page(html, year=year, source_url=official_url)
+            except CrawlerError:
+                logger.warning(
+                    "CCS %s official page fetch failed; falling back to DBLP",
+                    year,
+                )
 
             if not year_papers:
                 fallback_url = self.build_dblp_fallback_url(year)
@@ -65,6 +78,7 @@ class CCSCrawler(PaperCrawler):
         soup = BeautifulSoup(html, "html.parser")
         papers: list[dict[str, Any]] = []
         current_cycle = None
+        skipped = 0
 
         for node in soup.select("main h2, main h3, .page_box h2, .page_box h3, main li, .page_box li"):
             if node.name in {"h2", "h3"}:
@@ -77,6 +91,9 @@ class CCSCrawler(PaperCrawler):
 
             title = clean_text(link.get_text(" ", strip=True))
             if len(title) < 10:
+                continue
+            if self._is_non_paper_title(title):
+                skipped += 1
                 continue
 
             papers.append(
@@ -95,6 +112,7 @@ class CCSCrawler(PaperCrawler):
                 }
             )
 
+        logger.info("Skipped %s non-paper entries for CCS %s", skipped, year)
         return papers
 
     def parse_dblp_page(
@@ -108,6 +126,7 @@ class CCSCrawler(PaperCrawler):
 
         soup = BeautifulSoup(html, "html.parser")
         papers: list[dict[str, Any]] = []
+        skipped = 0
         for entry in soup.select("li.entry.inproceedings, li.entry.article"):
             title_node = entry.select_one("span.title")
             if not title_node:
@@ -115,6 +134,9 @@ class CCSCrawler(PaperCrawler):
 
             title = clean_text(title_node.get_text(" ", strip=True))
             if not title:
+                continue
+            if self._is_non_paper_title(title):
+                skipped += 1
                 continue
 
             authors: list[str] = []
@@ -148,4 +170,11 @@ class CCSCrawler(PaperCrawler):
                 }
             )
 
+        logger.info("Skipped %s non-paper entries for CCS %s", skipped, year)
         return papers
+
+    @classmethod
+    def _is_non_paper_title(cls, title: str) -> bool:
+        """Return whether one CCS entry title is a workshop/poster/demo-style item."""
+
+        return bool(cls.NON_PAPER_TITLE_PATTERN.match(title.strip()))

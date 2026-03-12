@@ -5,6 +5,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from src.exceptions import LLMError
 from src.llm.base import LLMProvider, LLMProviderError, LLMResponse, LLMUsage, ModelTier
@@ -169,4 +170,24 @@ class LLMClientTestCase(unittest.TestCase):
         with self.assertRaises(LLMError):
             client.generate("bad input")
 
+        self.assertEqual(len(provider.calls), 1)
+
+    def test_generate_supports_gemini_provider_identifier(self) -> None:
+        """The gemini provider string should resolve through the top-level client."""
+
+        provider = StubProvider(
+            [
+                LLMResponse(
+                    text="gemini text",
+                    model="gemini-2.5-pro",
+                    usage=LLMUsage(input_tokens=8, output_tokens=3, total_tokens=11),
+                )
+            ]
+        )
+
+        with patch("src.llm.client.GeminiProvider", return_value=provider):
+            client = LLMClient(provider="gemini", cache_dir=self.cache_dir)
+            result = client.generate("use gemini")
+
+        self.assertEqual(result, "gemini text")
         self.assertEqual(len(provider.calls), 1)

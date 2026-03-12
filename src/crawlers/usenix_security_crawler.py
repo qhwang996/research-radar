@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from typing import Any
 
 from bs4 import BeautifulSoup, Tag
@@ -18,6 +19,7 @@ class USENIXSecurityCrawler(PaperCrawler):
 
     source_name = "USENIX Security"
     source_slug = "usenix_security"
+    detail_request_delay_seconds = 0.5
 
     def build_year_url(self, year: int) -> str:
         """Return the technical sessions page URL for a USENIX Security year."""
@@ -61,21 +63,21 @@ class USENIXSecurityCrawler(PaperCrawler):
 
             container = self._find_paper_container(title_node)
             authors = self._extract_authors(container, title_node)
+            paper_url = self.to_absolute_url(source_url, title_node.get("href"))
 
-            papers.append(
-                {
-                    "title": title,
-                    "authors": authors,
-                    "year": year,
-                    "conference": f"USENIX Security {year}",
-                    "source_url": source_url,
-                    "paper_url": self.to_absolute_url(source_url, title_node.get("href")),
-                    "abstract": None,
-                    "pdf_url": None,
-                    "data_completeness": "with_authors" if authors else "title_only",
-                    "source_type": "papers",
-                }
-            )
+            paper = {
+                "title": title,
+                "authors": authors,
+                "year": year,
+                "conference": f"USENIX Security {year}",
+                "source_url": source_url,
+                "paper_url": paper_url,
+                "abstract": self._fetch_detail_abstract(paper_url) if paper_url else None,
+                "pdf_url": None,
+                "data_completeness": "with_authors" if authors else "title_only",
+                "source_type": "papers",
+            }
+            papers.append(paper)
             seen_titles.add(title)
 
         return papers
@@ -113,3 +115,33 @@ class USENIXSecurityCrawler(PaperCrawler):
             sibling = sibling.next_sibling
 
         return []
+
+    def _fetch_detail_abstract(self, paper_url: str) -> str | None:
+        """Fetch one USENIX paper detail page and extract the abstract."""
+
+        try:
+            detail_html = self.fetch_url(paper_url)
+            return self._extract_abstract(detail_html)
+        except Exception as exc:  # pragma: no cover - exercised through parser flow tests
+            logger.warning("Failed to fetch USENIX Security paper detail %s: %s", paper_url, exc)
+            return None
+        finally:
+            self._sleep_between_detail_requests()
+
+    def _extract_abstract(self, html: str) -> str | None:
+        """Extract one abstract string from a USENIX detail page."""
+
+        soup = BeautifulSoup(html, "html.parser")
+        for selector in ["div.field-name-field-paper-description", "div.paragraph-text-full"]:
+            for container in soup.select(selector):
+                text = clean_text(container.get_text(" ", strip=True))
+                if not text:
+                    continue
+                return re.sub(r"^abstract\s*[:\-]\s*", "", text, flags=re.IGNORECASE)
+        return None
+
+    def _sleep_between_detail_requests(self) -> None:
+        """Pause briefly between detail-page requests to reduce crawler pressure."""
+
+        if self.detail_request_delay_seconds > 0:
+            time.sleep(self.detail_request_delay_seconds)

@@ -52,11 +52,11 @@ class RecencyStrategy(BaseScoringStrategy):
 
         if artifact.published_at is not None:
             return self._normalize_datetime(artifact.published_at)
-        if artifact.fetched_at is not None:
-            return self._normalize_datetime(artifact.fetched_at)
         if artifact.year is not None:
             # Mid-year fallback avoids biasing unknown dates too early or too late.
             return datetime(artifact.year, 7, 1, tzinfo=timezone.utc)
+        if artifact.fetched_at is not None:
+            return self._normalize_datetime(artifact.fetched_at)
         return None
 
     def _normalize_datetime(self, value: datetime) -> datetime:
