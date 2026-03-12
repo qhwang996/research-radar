@@ -25,8 +25,8 @@ class RendererTestCase(unittest.TestCase):
         """Scores should include breakdown components when available."""
 
         self.assertEqual(
-            format_score(0.95, 0.9, 1.0),
-            "0.95 (recency: 0.90, authority: 1.00)",
+            format_score(0.95, 0.9, 1.0, 0.64),
+            "0.95 (recency: 0.90, authority: 1.00, relevance: 0.64)",
         )
 
     def test_format_date_with_datetime(self) -> None:

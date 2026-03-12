@@ -53,26 +53,27 @@ class WeeklyReportGeneratorTestCase(unittest.TestCase):
         self.assertTrue(report_path.exists())
         self.assertIn("No artifacts found", content)
 
-    def test_weekly_top_10(self) -> None:
-        """The top section should only include the ten highest-scoring artifacts."""
+    def test_weekly_top_30(self) -> None:
+        """The top section should include up to the thirty highest-scoring artifacts."""
 
         artifacts = [
             make_artifact(
                 title=f"Artifact {index:02d}",
-                final_score=1.0 - (index * 0.02),
+                final_score=1.0 - (index * 0.01),
                 created_at=self.week_start + timedelta(hours=index),
             )
-            for index in range(12)
+            for index in range(32)
         ]
         self._save_artifacts(*artifacts)
 
         content = self.generator.generate(self.target_date).read_text(encoding="utf-8")
         top_section = content.split("## Score Distribution", maxsplit=1)[0]
 
+        self.assertIn("## Top 30 Artifacts", top_section)
         self.assertIn("Artifact 00", top_section)
-        self.assertIn("Artifact 09", top_section)
-        self.assertNotIn("Artifact 10", top_section)
-        self.assertNotIn("Artifact 11", top_section)
+        self.assertIn("Artifact 29", top_section)
+        self.assertNotIn("Artifact 30", top_section)
+        self.assertNotIn("Artifact 31", top_section)
 
     def test_weekly_score_distribution(self) -> None:
         """Score buckets should match the included artifacts."""
@@ -92,6 +93,34 @@ class WeeklyReportGeneratorTestCase(unittest.TestCase):
         self.assertIn("- 0.7-0.8: 1 items", content)
         self.assertIn("- 0.6-0.7: 1 items", content)
         self.assertIn("- < 0.6: 1 items", content)
+
+    def test_weekly_relevance_distribution(self) -> None:
+        """Weekly reports should include the relevance-score distribution."""
+
+        self._save_artifacts(
+            make_artifact(title="High Relevance", relevance_score=0.8, created_at=self.week_start),
+            make_artifact(title="Medium Relevance", relevance_score=0.4, created_at=self.week_start + timedelta(hours=1)),
+            make_artifact(title="Low Relevance", relevance_score=0.2, created_at=self.week_start + timedelta(hours=2)),
+        )
+
+        content = self.generator.generate(self.target_date).read_text(encoding="utf-8")
+
+        self.assertIn("## Relevance Distribution", content)
+        self.assertIn("- 高相关 (>= 0.6): 1 items", content)
+        self.assertIn("- 中等 (0.3 - 0.6): 1 items", content)
+        self.assertIn("- 低相关 (< 0.3): 1 items", content)
+
+    def test_weekly_omits_all_artifacts_by_source_section(self) -> None:
+        """Weekly reports should no longer render the full grouped artifact list."""
+
+        self._save_artifacts(
+            make_artifact(title="Paper A", source_type=SourceType.PAPERS, created_at=self.week_start),
+            make_artifact(title="Blog A", source_type=SourceType.BLOGS, created_at=self.week_start + timedelta(hours=1)),
+        )
+
+        content = self.generator.generate(self.target_date).read_text(encoding="utf-8")
+
+        self.assertNotIn("## All Artifacts by Source", content)
 
     def test_weekly_content_breakdown(self) -> None:
         """Weekly reports should summarize source-type counts."""

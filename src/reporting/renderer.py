@@ -27,14 +27,21 @@ def truncate(text: str, max_length: int, suffix: str = "...") -> str:
     return text[: max_length - len(suffix)].rstrip() + suffix
 
 
-def format_score(final: float, recency: float | None, authority: float | None) -> str:
-    """Format a score plus its recency and authority breakdown."""
+def format_score(
+    final: float,
+    recency: float | None,
+    authority: float | None,
+    relevance: float | None = None,
+) -> str:
+    """Format a score plus its component breakdown."""
 
     parts: list[str] = []
     if recency is not None:
         parts.append(f"recency: {recency:.2f}")
     if authority is not None:
         parts.append(f"authority: {authority:.2f}")
+    if relevance is not None:
+        parts.append(f"relevance: {relevance:.2f}")
     if not parts:
         return f"{final:.2f}"
     return f"{final:.2f} ({', '.join(parts)})"
@@ -73,7 +80,7 @@ def format_artifact_entry(
         heading,
         f"- **Source**: {artifact.source_name or 'Unknown'} ({format_source_type_label(artifact.source_type)})",
         f"- **Published**: {format_date(artifact.published_at, artifact.year)}",
-        f"- **Score**: {format_score(artifact.final_score or 0.0, artifact.recency_score, artifact.authority_score)}",
+        f"- **Score**: {format_score(artifact.final_score or 0.0, artifact.recency_score, artifact.authority_score, artifact.relevance_score)}",
         f"- **URL**: {artifact.source_url}",
     ]
     if show_abstract and artifact.abstract:

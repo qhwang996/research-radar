@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import tempfile
 import unittest
 from datetime import date, datetime, timezone
@@ -82,8 +83,8 @@ class DailyReportGeneratorTestCase(unittest.TestCase):
         self.assertIn("**Abstract**: ", content)
         self.assertIn(("A" * 197) + "...", content)
 
-    def test_daily_medium_value_no_abstract(self) -> None:
-        """Medium-value entries should omit abstracts."""
+    def test_daily_medium_value_is_summarized_without_entry_list(self) -> None:
+        """Medium-value artifacts should be counted but not rendered as detailed entries."""
 
         self._save_artifacts(
             make_artifact(
@@ -95,7 +96,9 @@ class DailyReportGeneratorTestCase(unittest.TestCase):
 
         content = self.generator.generate(self.target_date).read_text(encoding="utf-8")
 
-        self.assertIn("Worth Reading", content)
+        self.assertIn("- Medium-value (0.6-0.8): 1", content)
+        self.assertIn("Medium-value: 1 artifacts (not listed)", content)
+        self.assertNotIn("Worth Reading", content)
         self.assertNotIn("This abstract should not be displayed.", content)
 
     def test_daily_sorted_by_score(self) -> None:
@@ -109,6 +112,24 @@ class DailyReportGeneratorTestCase(unittest.TestCase):
         content = self.generator.generate(self.target_date).read_text(encoding="utf-8")
 
         self.assertLess(content.index("Higher Ranked"), content.index("Lower Ranked"))
+
+    def test_daily_high_value_section_limits_displayed_artifacts(self) -> None:
+        """High-value section should show at most the configured number of detailed entries."""
+
+        self._save_artifacts(
+            *[
+                make_artifact(
+                    title=f"High Value {index:02d}",
+                    final_score=0.99 - (index * 0.001),
+                )
+                for index in range(50)
+            ]
+        )
+
+        content = self.generator.generate(self.target_date).read_text(encoding="utf-8")
+
+        self.assertEqual(len(re.findall(r"^### \d+\. ", content, flags=re.MULTILINE)), 30)
+        self.assertIn("20 more", content)
 
     def test_daily_file_written(self) -> None:
         """Daily reports should be written to the expected path."""

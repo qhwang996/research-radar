@@ -208,7 +208,7 @@
 - ✅ ScoringEngine支持对数据库中已有artifact批量评分
 
 **可选功能（Phase 2+）**：
-- RelevanceStrategy（需要LLM + Profile）
+- RelevanceStrategy ✅ 已在 P7.1 实现
 - FeedbackMultiplier（需要反馈数据）
 - 多策略实验框架
 
@@ -227,7 +227,7 @@
 - 全量测试通过（28 passed）
 
 **已知问题**：
-- 当前 relevance_score 仍未启用，Phase 1 只依赖 recency + authority
+- relevance_score 已通过 P7.1 启用，keyword match 提供基础区分度，LLM relevance 待 P7.2
 - 只有 `year` 没有精确日期的 artifact，recency 只能做粗粒度回退
 
 ---
@@ -350,16 +350,105 @@
 
 ---
 
+## Priority 7: 个性化评分（核心流程增强）
+
+### P7.1 Relevance Scoring (Keyword Match) ✅ 已完成（2026-03-11）
+**依赖**：P0.1, P3.1
+**核心功能**：
+- ✅ RelevanceStrategy（基于 Profile preferred_topics / avoided_topics 做 keyword match）
+- ✅ 搜索范围覆盖 title + abstract + summary_l1 + tags
+- ✅ 命中 1→0.4, 2→0.6, 3→0.8, 4+→1.0, 无命中→0.1
+- ✅ avoided_topic 命中时乘 0.3 惩罚系数
+- ✅ CompositeStrategy 更新为三因子：recency×0.4 + authority×0.3 + relevance×0.3
+- ✅ Profile seed CLI（profile seed / profile show）
+- ✅ seed_profile.json 初始用户画像
+
+**验收标准**：
+- [x] profile=None 时 relevance 返回 0.5（中性）
+- [x] keyword match 在 live 数据上产生 6 档区分度（0.03–0.6）
+- [x] final_score 从全部 1.0 分散为 18 档（0.629–0.88）
+- [x] High-value 条目从 1168 降到 103
+- [x] Top 10 全部是 fuzzing/vulnerability detection 相关论文
+- [x] 全量测试通过（82 passed）
+
+**实现亮点**：
+- 预留 _calculate_llm_relevance_score 和 _merge_relevance_scores 接口，LLM relevance 可无缝接入
+- keyword match 纯本地计算，无 LLM 成本
+- avoided_topics 惩罚系数有效将 blockchain 相关论文推到底部
+
+**已知问题**：
+- keyword match 无法区分语义近似但领域不同的内容（如 web fuzzing vs binary fuzzing vs sensor fuzzing）
+- relevance 最高只到 0.6（命中 2 个 topic），同一年同领域论文仍缺乏细粒度区分
+- 需要 LLM relevance scoring 才能真正理解论文与用户兴趣的匹配度
+
+### P7.2 LLM Relevance Scoring ✅ 已完成（2026-03-12）
+**依赖**：P7.1, P2.2
+**核心功能**：
+- ✅ LLMRelevancePipeline 预计算 LLM relevance 分数，存入 score_breakdown
+- ✅ prompt v2：精确区分 web fuzzing vs 通用 fuzzing vs 二进制分析
+- ✅ 1-5 分映射为 0.0-1.0，与 keyword match 按 0.4/0.6 加权合并
+- ✅ 文件缓存 + relevance_version 版本幂等（v1→v2 自动重评）
+- ✅ ThreadPoolExecutor 并行（默认 8 workers）
+- ✅ CLI: `llm-relevance --provider --workers` + `run` 命令集成
+
+**验收结果**：
+- 4116 条 artifact 全部有 llm_relevance_score
+- LLM relevance 分布：0.2=2538, 0.4=1131, 0.6=203, 0.8=200, 1.0=44
+- final_score 59 档（0.63-0.98），中位数 0.748
+- Top 10 以 web 安全直接相关论文为主
+
+**已知问题**：
+- abstract 缺失（3322/4116）导致 LLM 只靠标题+summary_l1 判断
+- CCS 无 abstract（DBLP 不提供），需后续补 ACM DL 抓取
+- 2 条 fenced JSON 解析失败需人工恢复
+
+### 爬虫增强：abstract 抓取 ✅ 已完成（2026-03-12）
+- NDSS + USENIX Security 详情页抓取 abstract，节流 0.5s/请求
+- S&P 和 CCS 暂不支持（S&P 无独立论文页，CCS 的 DBLP 无 abstract）
+- 当前 abstract 覆盖：794/4116（仅 NDSS 有）
+
+### CCS 非 full-paper 过滤 ✅ 已完成（2026-03-12）
+- 爬虫层正则过滤 workshop/poster/demo/tutorial/keynote/panel
+- cleanup-ccs CLI 命令清理已入库的 191 条历史数据
+- SoK 论文不被过滤
+
+### 并行加速 ✅ 已完成（2026-03-12）
+- enrichment + llm-relevance 均支持 ThreadPoolExecutor
+- CLI --workers 参数，默认 8
+- 每个 worker 独立 DB session，线程安全
+
+### P4.2 报告改版 ✅ 已完成（2026-03-12）
+**依赖**：P7.2
+**核心功能**：
+- ✅ 周报 Top 10 → Top 30
+- ✅ 周报删除 "All Artifacts by Source" 全量列表
+- ✅ 周报新增 Relevance Distribution（高相关 ≥0.6 / 中等 0.3-0.6 / 低相关 <0.3）
+- ✅ 日报砍掉 medium value 逐条明细，只显示统计数字
+- ✅ `format_score` 增加 relevance 显示
+
+**验收结果**：
+- 日报从 650KB+ 缩减到 209 行
+- 周报从 4214 行缩减到 ~280 行
+- Relevance 分档：高相关 233 / 中等 471 / 低相关 3221
+- 测试 106 passed（+3 新测试）
+
+### USENIX abstract 爬虫修复 ✅ 已完成（2026-03-12）
+- CSS selector 修复：`div.field--name-...`（双横线）→ `div.field-name-...`（单横线）
+- 新增单测 + 容错测试
+- 尚未重新爬取（待下次 session）
+
+---
+
 ## Phase 1 最小可用版本（MVP）
 
-**必须完成**：P0.1, P1.1, P2.1, P2.2, P2.3, P3.1, P4.1, P5.1, P6.1
+**必须完成**：P0.1, P1.1, P2.1, P2.2, P2.3, P3.1, P4.1, P5.1, P6.1, P7.1
 
 **可以跳过**：
 - Theme模型和主题提取（可以用关键词代替）
 - CandidateDirection复杂逻辑（可以简化为Top 3主题）
 - DailyReport（只要WeeklyReport）
 - 调度器（可以手动运行）
-- RelevanceStrategy（可以只用Recency + Authority）
+- LLM Relevance Scoring（P7.2，可先只用 keyword match）
 
 **预估时间**：
 - 有coding agent：1-2周
@@ -367,7 +456,7 @@
 
 **验收标准**：
 1. 能爬取NDSS和S&P论文
-2. 能生成摘要和评分
+2. 能生成摘要和基础个性化评分（含 keyword match relevance）
 3. 能生成周报（Top 10论文）
 4. 能收集反馈
 5. 系统能手动运行完整流程
@@ -381,6 +470,8 @@
 - L2/L3摘要生成
 - 关联发现
 - 调度器（自动运行）
+- P7.2 LLM Relevance Scoring ✅
+- P4.2 报告改版 ✅
 
 **预估时间**：1-2周
 

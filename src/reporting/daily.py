@@ -9,6 +9,8 @@ from src.models.artifact import Artifact
 from src.reporting.base import BaseReportGenerator
 from src.reporting.renderer import format_artifact_entry
 
+HIGH_VALUE_DISPLAY_LIMIT = 30
+
 
 class DailyReportGenerator(BaseReportGenerator):
     """Generate a daily markdown report."""
@@ -53,6 +55,7 @@ class DailyReportGenerator(BaseReportGenerator):
             "## Summary",
             f"- Total artifacts: {len(included)}",
             f"- High-value (score >= 0.8): {len(high_value)}",
+            f"- Medium-value (0.6-0.8): {len(medium_value)}",
             f"- Sources: Papers {stats['papers']}, Blogs {stats['blogs']}, Advisories {stats['advisories']}",
             "",
         ]
@@ -80,7 +83,9 @@ class DailyReportGenerator(BaseReportGenerator):
             ]
         )
         if high_value:
-            for rank, artifact in enumerate(high_value, start=1):
+            displayed_high_value = high_value[:HIGH_VALUE_DISPLAY_LIMIT]
+            hidden_high_value_count = max(0, len(high_value) - HIGH_VALUE_DISPLAY_LIMIT)
+            for rank, artifact in enumerate(displayed_high_value, start=1):
                 lines.extend(
                     [
                         "",
@@ -92,6 +97,8 @@ class DailyReportGenerator(BaseReportGenerator):
                         ),
                     ]
                 )
+            if hidden_high_value_count:
+                lines.extend(["", f"> ... and {hidden_high_value_count} more high-value artifacts not shown."])
         else:
             lines.extend(["", "No high-value artifacts found."])
 
@@ -104,17 +111,7 @@ class DailyReportGenerator(BaseReportGenerator):
             ]
         )
         if medium_value:
-            for rank, artifact in enumerate(medium_value, start=1):
-                lines.extend(
-                    [
-                        "",
-                        format_artifact_entry(
-                            artifact,
-                            rank=rank,
-                            show_abstract=False,
-                        ),
-                    ]
-                )
+            lines.extend(["", f"Medium-value: {len(medium_value)} artifacts (not listed)"])
         else:
             lines.extend(["", "No medium-value artifacts found."])
 

@@ -9,6 +9,8 @@
 final_score = (recency_score × 0.4) + (authority_score × 0.3) + (relevance_score × 0.3)
 ```
 
+> **Phase 2 状态 (2026-03-11)**：relevance_score 当前只实现 keyword match 部分（P7.1），LLM relevance scoring 待 P7.2 实现后与 keyword match 按 0.4/0.6 加权合并。
+
 然后根据历史反馈调整：
 ```
 adjusted_score = final_score × feedback_multiplier
@@ -235,4 +237,3 @@ relevance_score = (keyword_match_score × 0.4) + (llm_relevance_score × 0.6)
 - Adjusted Score: 0.944 × 1.2 = **1.13** (cap at 1.0 = **1.0**)
 
 **结论**：这是一篇高优先级内容，应保留完整信息。
-

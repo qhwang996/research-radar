@@ -2,17 +2,12 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
 from datetime import date, timedelta
 from pathlib import Path
 
 from src.models.artifact import Artifact
 from src.reporting.base import BaseReportGenerator
-from src.reporting.renderer import (
-    format_artifact_entry,
-    format_date,
-    format_source_type_label,
-)
+from src.reporting.renderer import format_artifact_entry
 
 
 class WeeklyReportGenerator(BaseReportGenerator):
@@ -30,10 +25,10 @@ class WeeklyReportGenerator(BaseReportGenerator):
             "period_end": (end - timedelta(days=1)).date(),
             "generated_at": self._current_time(),
             "artifacts": artifacts,
-            "top_artifacts": artifacts[:10],
+            "top_artifacts": artifacts[:30],
             "content_breakdown": self._build_source_breakdown(artifacts),
             "score_distribution": self._build_score_distribution(artifacts),
-            "grouped_artifacts": self._group_by_source_type(artifacts),
+            "relevance_distribution": self._build_relevance_distribution(artifacts),
         }
         return self._write_report("weekly", f"{iso_year}-W{iso_week:02d}.md", self.render(context))
 
@@ -48,7 +43,7 @@ class WeeklyReportGenerator(BaseReportGenerator):
         top_artifacts: list[Artifact] = context["top_artifacts"]
         content_breakdown: dict[str, int] = context["content_breakdown"]
         score_distribution: dict[str, int] = context["score_distribution"]
-        grouped_artifacts: dict[str, list[Artifact]] = context["grouped_artifacts"]
+        relevance_distribution: dict[str, int] = context["relevance_distribution"]
 
         lines = [
             "# Research Radar - Weekly Report",
@@ -89,9 +84,10 @@ class WeeklyReportGenerator(BaseReportGenerator):
                     "",
                     "---",
                     "",
-                    "## All Artifacts by Source",
-                    "",
-                    "No artifacts found.",
+                    "## Relevance Distribution",
+                    "- 高相关 (>= 0.6): 0 items",
+                    "- 中等 (0.3 - 0.6): 0 items",
+                    "- 低相关 (< 0.3): 0 items",
                 ]
             )
             return "\n".join(lines)
@@ -100,7 +96,7 @@ class WeeklyReportGenerator(BaseReportGenerator):
             [
                 "---",
                 "",
-                "## Top 10 Artifacts",
+                "## Top 30 Artifacts",
             ]
         )
         for rank, artifact in enumerate(top_artifacts, start=1):
@@ -130,23 +126,12 @@ class WeeklyReportGenerator(BaseReportGenerator):
                 "",
                 "---",
                 "",
-                "## All Artifacts by Source",
+                "## Relevance Distribution",
+                f"- 高相关 (>= 0.6): {relevance_distribution['high']} items",
+                f"- 中等 (0.3 - 0.6): {relevance_distribution['medium']} items",
+                f"- 低相关 (< 0.3): {relevance_distribution['low']} items",
             ]
         )
-
-        for source_type, items in grouped_artifacts.items():
-            lines.extend(
-                [
-                    "",
-                    f"### {format_source_type_label(source_type)} ({len(items)} items)",
-                ]
-            )
-            for index, artifact in enumerate(items, start=1):
-                lines.append(
-                    f"{index}. [{artifact.title}] - score: {(artifact.final_score or 0.0):.2f} "
-                    f"- source: {artifact.source_name or 'Unknown'} "
-                    f"- published: {format_date(artifact.published_at, artifact.year)}"
-                )
 
         return "\n".join(lines)
 
@@ -184,11 +169,20 @@ class WeeklyReportGenerator(BaseReportGenerator):
                 distribution["lt_0_6"] += 1
         return distribution
 
-    def _group_by_source_type(self, artifacts: list[Artifact]) -> dict[str, list[Artifact]]:
-        """Group artifacts by source type while preserving score ordering."""
+    def _build_relevance_distribution(self, artifacts: list[Artifact]) -> dict[str, int]:
+        """Compute a simple relevance-score distribution."""
 
-        grouped: defaultdict[str, list[Artifact]] = defaultdict(list)
+        distribution = {
+            "high": 0,
+            "medium": 0,
+            "low": 0,
+        }
         for artifact in artifacts:
-            key = getattr(artifact.source_type, "value", str(artifact.source_type))
-            grouped[key].append(artifact)
-        return dict(grouped)
+            relevance = artifact.relevance_score or 0.0
+            if relevance >= 0.6:
+                distribution["high"] += 1
+            elif relevance >= 0.3:
+                distribution["medium"] += 1
+            else:
+                distribution["low"] += 1
+        return distribution

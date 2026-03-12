@@ -36,7 +36,10 @@
 - 报告日期窗口按 UTC 解释，操作时如果按本地时区理解日期，可能得到空日报
 - Raw JSON 历史格式不一致，NormalizationPipeline 已兼容 legacy 和 current 格式
 - Raw 文件删除条目时不会自动回收旧 artifact（Phase 1 只做 append/update）
-- 当前 live 语料全部是 2025 顶会论文，P3.1 的 recency + authority 在该数据集上区分度很弱，weekly top list 大量并列 1.0
+- P7.1 keyword match 已缓解评分区分度问题（final_score 从全 1.0 分散为 18 档），但 keyword match 无法区分语义近似内容（web fuzzing vs binary fuzzing），需要 P7.2 LLM relevance 进一步改善
+- CCS 爬虫（DBLP fallback）混入了 workshop/poster/demo 等非 full-paper 条目，已通过爬虫层正则过滤 + cleanup-ccs CLI 清理 191 条历史数据
+- abstract 覆盖率低（794/3925），仅 NDSS 有 abstract。CCS（DBLP 无 abstract）、S&P（无独立论文页）均缺失。USENIX Security 的 CSS selector 已修复（`field--name` → `field-name`），待重新爬取
+- IEEE S&P 2022-2024 爬取遇到 TLS SSLEOFError，需要重试或换代理
 
 **状态**：Phase 1 接受
 
@@ -132,3 +135,22 @@ CLI 和 Feedback Collector 合为一个任务，一次交付完整 CLI。
 
 ### D6: Phase 1 Feedback 不影响评分 (2026-03-11)
 只收集，feedback_multiplier 接入 deferred to Phase 2。
+
+### D7: Phase 2 评分引入 relevance (2026-03-11)
+评分公式从 recency×0.5 + authority×0.5 变为 recency×0.4 + authority×0.3 + relevance×0.3。
+keyword match 先行，LLM relevance 作为 P7.2 追加。
+
+### D8: Seed Profile 手动初始化 (2026-03-11)
+通过 profile seed CLI 加载 data/seed_profile.json，Phase 2 之前手动维护。
+
+### D9: 周报全量列表无价值 (2026-03-11)
+1168 条全列出来不可读。P4.2 改为 Top 30 + 分档统计，删除全量列表。
+
+### D10: LLM relevance 独立 pipeline 预计算 (2026-03-12)
+LLM relevance 不在 scoring 循环中调用，而是作为独立 pipeline 预计算存入 score_breakdown，避免每次 score 命令触发 API 调用。
+
+### D11: CCS 非 full-paper 物理删除 (2026-03-12)
+项目无 soft delete 状态，workshop/poster/demo 等非 full-paper 条目直接物理删除。
+
+### D12: LLM relevance 版本幂等 (2026-03-12)
+score_breakdown 中同时存储 llm_relevance_score 和 llm_relevance_version，版本不匹配时自动重评。
