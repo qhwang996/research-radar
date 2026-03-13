@@ -418,20 +418,19 @@
 - CLI --workers 参数，默认 8
 - 每个 worker 独立 DB session，线程安全
 
-### P4.2 报告改版 ✅ 已完成（2026-03-12）
-**依赖**：P7.2
-**核心功能**：
-- ✅ 周报 Top 10 → Top 30
-- ✅ 周报删除 "All Artifacts by Source" 全量列表
-- ✅ 周报新增 Relevance Distribution（高相关 ≥0.6 / 中等 0.3-0.6 / 低相关 <0.3）
-- ✅ 日报砍掉 medium value 逐条明细，只显示统计数字
+### P4.2 报告改版 ✅ 已完成（2026-03-12），P4.3 报告重设计 ✅ 已完成（2026-03-13）
+
+**P4.2 核心功能**：
+- ✅ 周报 Top 30 + Relevance Distribution + 删全量列表
+- ✅ 日报砍掉 medium value 明细
 - ✅ `format_score` 增加 relevance 显示
 
-**验收结果**：
-- 日报从 650KB+ 缩减到 209 行
-- 周报从 4214 行缩减到 ~280 行
-- Relevance 分档：高相关 233 / 中等 471 / 低相关 3221
-- 测试 106 passed（+3 新测试）
+**P4.3 报告重设计**（基于用户消费习惯重新定义日报/周报定位）：
+- ✅ 日报 = 博客推荐（近 3 天未读，最多 5 篇）+ 论文动态提示（仅状态机更新时）
+- ✅ 周报 = 论文推荐阅读（全库未读 high-relevance，最多 10 篇）+ 博客回顾表格
+- ✅ 已读过滤：FeedbackType.READ 标记后报告不再推荐
+- ✅ 不同内容类型分栏，不混排
+- 设计文档：docs/design/04_report_spec.md
 
 ### USENIX abstract 爬虫修复 + 重爬 ✅ 已完成（2026-03-13）
 - CSS selector 修复：`div.field--name-...`（双横线）→ `div.field-name-...`（单横线）
