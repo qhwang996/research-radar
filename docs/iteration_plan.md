@@ -473,75 +473,125 @@
 
 **进行中 / 近期计划**：
 
-### Phase 2a：博客源 live 验证（当前优先）⬜
-1. 逐个 live 验证 3 个已有博客爬虫（PortSwigger、Project Zero、Cloudflare）
-2. 修复 HTML selector 漂移问题（如有）
-3. 博客数据走完全流程：crawl → normalize → enrich → llm-relevance → score → report
-4. 验证博客在报告中的排序和呈现是否合理
+### Phase 2a：博客源 live 验证 ✅ 已完成（2026-03-13）
+1. ✅ 逐个 live 验证 3 个已有博客爬虫（PortSwigger、Project Zero、Cloudflare）
+2. ✅ 修复 HTML selector 漂移问题（Project Zero blogspot → projectzero.google）
+3. ✅ 博客数据走完全流程：crawl → normalize → enrich → llm-relevance → score → report
+4. ✅ 55 条博客入库
 
-### Phase 2b：GitHub Advisory 爬虫 ⬜
+### Phase 2b：GitHub Advisory 爬虫 ⬜（降低优先级）
 1. 实现 GitHub Advisory 爬虫（GraphQL API）
 2. 接入 normalize pipeline
 3. authority 打分暂用 CVSS 映射
 
-### Phase 2c：调度器 ⬜
-在 Phase 2a/2b 完成、日更数据源就绪后实现。详见 `docs/design/05_source_plan.md` 第 6 节。
+> **优先级调整**：Advisory 偏漏洞运营层面，对博士研究选题收敛的直接价值有限。优先实施 Phase 3 智能分析层。
 
-**后续模块**：
-- Evolution Tracker（追踪热度变化）
-- 主题聚类视图
-- L2/L3 摘要生成
+### Phase 2c：调度器 ⬜（降低优先级）
+在智能分析层就绪后实现。详见 `docs/design/05_source_plan.md` 第 6 节。
+
+### Phase 2 遗留数据质量问题 ⬜
+- S&P 2022-2024 TLS 问题排查（abstract 0/374）
+- CCS abstract 从 ACM DL 补抓（abstract 0/1201）
 
 ---
 
-## Phase 3 智能优化
+## Phase 3 研究情报分析（当前优先）
 
-**新增模块**：
-- 多策略实验框架
-- 预测性分析
-- 高级主题提取
+**设计目标**：在现有数据基座上增加智能分析层，实现从「信息过滤」到「研究方向收敛」的跨越。
 
-**预估时间**：持续迭代
+**完整设计**：`docs/design/09_intelligence_layer.md`
+
+### P3a：L2 深度分析 ⬜
+**依赖**：无（利用现有 Artifact.summary_l2 字段）
+**核心功能**：
+- DeepAnalysisPipeline：对 ~200 篇高相关论文生成结构化深度分析
+- 输出 JSON：research_problem / methodology / core_contributions / limitations / open_questions
+- LLM STANDARD tier，逐条处理，ThreadPoolExecutor 并行
+- prompt 模板：`prompts/deep_analysis.md`
+- CLI 命令：`deep-analyze`
+
+**验收标准**：
+- [ ] relevance >= 0.6 的论文有 summary_l2
+- [ ] summary_l2 JSON 结构完整可解析
+- [ ] 缓存有效，重跑跳过已分析的论文
+
+### P3b：主题聚类 ⬜
+**依赖**：P3a
+**核心功能**：
+- Theme 模型 + ThemeRepository
+- ClusteringPipeline：LLM 语义聚类（分批 30-40 篇 + merge pass）
+- 增量策略：新论文先分类到已有 Theme，>10 篇无法分类时触发全量重聚类
+- prompt 模板：`prompts/cluster_papers.md`
+- CLI 命令：`cluster`
+
+**验收标准**：
+- [ ] 生成 ~10-15 个语义合理的 Theme
+- [ ] 每个 Theme 有 name / description / artifact_ids / keywords
+- [ ] CORE 状态的 Theme 在重聚类时保留
+
+### P3c：趋势分析 ⬜
+**依赖**：P3b
+**核心功能**：
+- TrendAnalysisPipeline：定量统计（论文数/年）+ 定性分析（方法演进、开放问题）
+- 更新 Theme 的 trend_direction / methodology_tags / open_questions
+- prompt 模板：`prompts/analyze_theme_trend.md`
+- CLI 命令：`trend`
+
+**验收标准**：
+- [ ] 每个 Theme 有 trend_direction（growing/stable/declining）
+- [ ] methodology_tags 和 open_questions 有意义
+
+### P3d：方向综合 ⬜
+**依赖**：P3c
+**核心功能**：
+- CandidateDirection 模型 + CandidateDirectionRepository
+- DirectionSynthesisPipeline：综合 Themes + Profile + 反馈，输出 2-3 个候选方向
+- LLM PREMIUM tier，每周一次调用
+- prompt 模板：`prompts/build_candidate_direction.md`（填充现有空文件）
+- CLI 命令：`synthesize`
+
+**验收标准**：
+- [ ] 生成 2-3 个候选方向，每个有 title / rationale / why_now / 评分 / 支撑论文
+- [ ] 方向与用户研究兴趣（web fuzzing / vulnerability detection）高度相关
+
+### P3e：Landscape 报告 + 方向/主题反馈 ⬜
+**依赖**：P3d
+**核心功能**：
+- LandscapeReportGenerator（替换 WeeklyReportGenerator）
+- 报告结构：研究前沿地图 + 趋势洞察 + 候选方向 + 推荐阅读 + 博客回顾
+- feedback CLI 扩展：`--theme-id` / `--direction-id`
+- `run --full` 串联智能分析全链路
+
+**验收标准**：
+- [ ] Landscape 报告包含所有 section，内容有意义
+- [ ] 反馈命令支持对 Theme 和 Direction 操作
+- [ ] `run --full` 完整运行不报错
+
+### P3f：Profile 信号提取 ⬜
+**依赖**：P3e（需要反馈数据）
+**核心功能**：
+- ProfileSignalPipeline：从反馈历史提取偏好模式
+- 更新 Profile.feedback_patterns
+- prompt 模板：`prompts/extract_profile_signals.md`（填充现有空文件）
+
+**验收标准**：
+- [ ] feedback_patterns 反映用户反馈趋势
+- [ ] 方向综合 prompt 能利用 feedback_patterns 提升推荐质量
 
 ---
 
 ## 一个月内能完成什么？
 
-### 乐观情况（有coding agent，效率高）
-- Week 1: 完成Phase 1 MVP
-- Week 2: 试运行，调整参数，修复bug
-- Week 3: 完成Phase 2部分功能（演化追踪、调度器）
-- Week 4: 持续运行验证，优化
+### 当前优先级排序（2026-03-13 更新）
 
-### 保守情况
-- Week 1-2: 完成Phase 1 MVP
-- Week 3: 试运行，调整
-- Week 4: 开始Phase 2
+1. **Phase 3 智能分析层**（P3a → P3b → P3c → P3d → P3e → P3f）— 这是系统真正产生价值的核心
+2. **Phase 2 数据质量**（S&P TLS 修复、CCS abstract 补抓）— 提升 L2 分析和聚类质量
+3. **Phase 2b/2c**（Advisory 爬虫、调度器）— 降低优先级，等智能分析层就绪后再考虑
 
-### 建议策略
-1. **快速完成MVP**（1周）
-2. **立即试运行**（收集真实数据，验证价值）
-3. **根据试运行结果决定Phase 2优先级**
-4. **不要追求完美，先让系统跑起来**
-
----
-
-## 提前完成怎么办？
-
-### 如果Phase 1提前完成
-1. **立即试运行2周**（这是最重要的）
-2. 根据试运行发现的问题优先修复
-3. 如果运行顺利，开始Phase 2
-
-### 如果Phase 2提前完成
-1. 继续试运行，积累数据
-2. 开始Phase 3的策略实验
-3. 或者添加更多数据源（CCS, USENIX, arXiv）
-
-### 灵活调整原则
-- **价值优先**：优先做对你最有价值的功能
-- **数据驱动**：根据试运行结果调整优先级
-- **不要过度工程**：够用就好，不要追求完美
+### 指导原则
+- **纵向深化 > 横向扩展**：先把现有 ~200 篇高相关论文的分析做透，再考虑加新数据源
+- **核心输出优先**：候选研究方向是系统的最终产物，所有工作围绕这个目标
+- **增量验证**：每完成一个阶段就验证输出质量，不要等全部完成再看效果
 
 ---
 

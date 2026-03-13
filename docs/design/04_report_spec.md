@@ -12,15 +12,17 @@
 
 ---
 
-## 2. 日报 vs 周报的定位
+## 2. 日报 vs Landscape 全景报告的定位
 
-| 维度 | 日报 | 周报 |
-|------|------|------|
+| 维度 | 日报 | Landscape 全景报告 |
+|------|------|-------------------|
 | 时间投入 | 5-10 分钟 | 1-2 小时 |
-| 内容类型 | 博客 + 漏洞公告（日更源） | 论文精选推荐 |
-| 推荐数量 | 博客 3-5 篇 + 漏洞速报 3-5 条 | 论文 5-10 篇 |
-| 论文是否出现 | **不出现**，除非当天有状态机更新 | 主要内容 |
-| 反馈收集 | 无 | 用户主动反馈已读论文和评价 |
+| 内容类型 | 博客 + 漏洞公告（日更源） | 研究前沿地图 + 趋势洞察 + 候选方向 + 推荐阅读 |
+| 核心价值 | 快速感知业界动态 | 理解领域全貌、发现研究空白、收敛研究方向 |
+| 论文是否出现 | **不出现**，除非当天有状态机更新 | 主要内容（按主题聚类组织，非平坦列表） |
+| 反馈收集 | 无 | 用户对方向和主题反馈 |
+
+> **注意**：Landscape 报告替换了原周报（Section 4）。原周报代码保留但标记 deprecated。
 
 ---
 
@@ -88,78 +90,110 @@
 
 ---
 
-## 4. Weekly Report (周报)
+## 4. Landscape Report (研究前沿全景报告) — 替换原周报
 
 ### 4.1 文件命名
-`data/reports/weekly/YYYY-WXX.md`
+`data/reports/weekly/YYYY-WXX.md`（复用周报目录）
 
-### 4.2 报告结构
+### 4.2 依赖
+需要智能分析层（Phase 3）就绪：Theme 聚类 + 趋势分析 + 候选方向。详见 `09_intelligence_layer.md`。
+
+### 4.3 报告结构
 
 ```markdown
-# Research Radar - 周报
+# Research Radar - 研究前沿全景报告
 **周**: YYYY-WXX
 **周期**: YYYY-MM-DD 至 YYYY-MM-DD
 **生成时间**: YYYY-MM-DD HH:MM
 
 ---
 
-## 本周论文推荐阅读（N 篇）
+## 研究前沿地图
 
-从本周及历史高相关度论文中精选，优先推荐未读论文。
+当前追踪 N 个研究子领域，涵盖 M 篇高相关论文。
 
-### 1. [论文标题]
-- **来源**: USENIX Security 2025
-- **评分**: 0.95 (recency: 1.00, authority: 1.00, relevance: 0.84)
-- **URL**: [link]
-- **摘要**: 论文摘要（200-300 字）...
+### 1. [Theme Name] ▲ 上升趋势
+- **论文数**: 2022: X | 2023: Y | 2024: Z | 2025: W
+- **代表方法**: method1, method2, method3
+- **关键开放问题**:
+  - 问题1...
+  - 问题2...
+- **代表论文**: [Paper A] (USENIX 2025), [Paper B] (CCS 2024)
 
-### 2. [论文标题]
+### 2. [Theme Name] — 稳定
 ...
+
+---
+
+## 趋势洞察
+
+### 上升领域
+- [Theme]: 近两年论文数增长 X%，关键驱动...
+
+### 方法论演进
+- 从 X 方法向 Y 方法转变...
+
+### 研究空白
+- **空白 1**: 多篇论文提到但未解决...
+- **空白 2**: ...
+
+---
+
+## 候选研究方向
+
+### 方向 1: [Direction Title]
+- **概述**: ...
+- **为什么现在**: ...
+- **新颖性**: ★★★★☆  |  **影响力**: ★★★★★  |  **可行性**: ★★★☆☆
+- **支撑论文**:
+  - [Paper A] (USENIX 2025) — 贡献...
+  - [Paper B] (CCS 2024) — 贡献...
+- **待解决问题**:
+  - 问题1...
+- **建议下一步**: ...
+
+### 方向 2: [Direction Title]
+...
+
+---
+
+## 推荐阅读
+
+支撑以上方向的论文，按优先级排序（排除已读）。
+
+| # | 标题 | 来源 | 关联方向 | 相关度 | 状态 |
+|---|------|------|----------|--------|------|
+| 1 | ... | USENIX 2025 | 方向1 | 0.95 | 未读 |
 
 ---
 
 ## 本周博客回顾
 
-本周共收录 X 篇博客文章。
-
 | # | 标题 | 来源 | 相关度 | 状态 |
 |---|------|------|--------|------|
-| 1 | [标题] | PortSwigger | 0.85 | 未读 |
-| 2 | [标题] | Project Zero | 0.72 | 已读 |
-| ... | | | | |
-
----
-
-## Relevance 分档统计
-
-- 高相关 (>= 0.6): N items
-- 中等 (0.3 - 0.6): N items
-- 低相关 (< 0.3): N items
-
----
-
-## Score Distribution
-
-- >= 0.9: N items
-- 0.8-0.9: N items
-- 0.7-0.8: N items
-- 0.6-0.7: N items
-- < 0.6: N items
+| 1 | ... | PortSwigger | 0.85 | 未读 |
 
 ---
 
 ## 统计
-- 本周新增论文: X 篇
-- 本周新增博客: Y 篇
-- 数据库总量: Z 条
+- 高相关论文总数: X（已深度分析: Y）
+- 研究子领域数: Z
+- 累计候选方向数: W
+- 数据库总量: T
 ```
 
-### 4.3 周报生成逻辑
+### 4.4 Landscape 报告生成逻辑
 
-1. **论文推荐**：从所有未读的 high-relevance PAPERS（relevance >= 0.6）中，按 final_score 降序取前 10 篇
-2. **博客回顾**：本周新增的 BLOGS 类型 artifact，按 relevance 排序，表格形式展示，标注已读/未读
-3. **统计**：score distribution + relevance distribution（保留现有逻辑）
-4. 过滤逻辑：论文推荐优先未读内容；已读论文不出现在推荐区
+1. **研究前沿地图**：从 `themes` 表加载所有 `status IN (candidate, core)` 的 Theme，按 `artifact_count` 降序排列
+2. **趋势洞察**：从 Theme 的 `trend_direction`、`methodology_tags`、`open_questions` 提取
+3. **候选方向**：从 `candidate_directions` 表加载当周或最近的 `status == active` 方向
+4. **推荐阅读**：收集所有候选方向的 `supporting_artifact_ids`，去重后按 `final_score` 降序，排除已读
+5. **博客回顾**：本周新增 BLOGS 类型 artifact，表格形式展示
+6. 已读过滤：所有推荐列表排除 `FeedbackType.READ` 标记的 artifact
+
+### 4.5 原周报（Deprecated）
+
+原 `WeeklyReportGenerator` 代码保留但不再作为默认周报生成器。如需回退，可通过 `report --type weekly-legacy` 调用。
 
 ---
 
@@ -183,10 +217,20 @@ python -m src.cli feedback --artifact-id 123 --type read --note "很有启发，
 ### 5.3 反馈闭环
 
 用户每周主动通过 CLI 反馈：
-- `feedback --type read`：标记已读
-- `feedback --type like`：标记喜欢（提升后续推荐权重）
-- `feedback --type dislike`：标记不喜欢（降低后续推荐权重）
-- `feedback --type note --note "..."`：附加评论
+
+**Artifact 级反馈**：
+- `feedback --artifact-id 123 --type read`：标记已读
+- `feedback --artifact-id 123 --type like`：标记喜欢
+- `feedback --artifact-id 123 --type dislike`：标记不喜欢
+- `feedback --artifact-id 123 --type note --note "..."`：附加评论
+
+**Theme 级反馈**（Phase 3）：
+- `feedback --theme-id UUID --type like`：确认主题有价值（提升为 CORE）
+- `feedback --theme-id UUID --type dislike`：标记不感兴趣
+
+**Direction 级反馈**（Phase 3）：
+- `feedback --direction-id UUID --type like`：标记方向有前景
+- `feedback --direction-id UUID --type note --note "..."`：对方向附加评论
 
 ---
 

@@ -4,12 +4,17 @@
 
 支持单人、长期、可重跑、可追溯的研究方向收敛流程。
 
-核心链路：
+核心链路（Phase 1-2，数据基座）：
 ```
 Source → Raw JSON → Artifact → Score → Report → Feedback → Profile Update
 ```
 
-Phase 1 简化：无 Theme / CandidateDirection，直接 Top 10 + 评分排序。
+Phase 3 扩展（智能分析层）：
+```
+Score → Deep Analyze (L2) → Cluster (Themes) → Trend Analyze → Synthesize Directions → Landscape Report
+```
+
+完整设计见 `09_intelligence_layer.md`。
 
 ---
 
@@ -34,9 +39,9 @@ research-radar/
 │   ├── models/          # SQLAlchemy ORM 模型
 │   ├── repositories/    # Repository 层（CRUD 封装）
 │   ├── crawlers/        # 爬虫（四大顶会 + 3 博客）
-│   ├── pipelines/       # Normalization + Enrichment
-│   ├── scoring/         # 评分引擎（Recency + Authority）
-│   ├── reporting/       # Daily / Weekly 报告生成
+│   ├── pipelines/       # Normalization + Enrichment + Deep Analysis + Clustering + Trend + Direction Synthesis
+│   ├── scoring/         # 评分引擎（Recency + Authority + Relevance）
+│   ├── reporting/       # Daily / Landscape 报告生成
 │   ├── llm/             # LLM 客户端（provider + cache + retry）
 │   ├── cli/             # CLI 入口
 │   ├── db/              # 数据库 session 管理
@@ -72,23 +77,45 @@ research-radar/
 2. 逐条调用 LLM (FAST tier) 生成 summary_l1 + tags
 3. 写回 Artifact
 
-### 4.4 Score (P3.1)
-Phase 1 公式：`final_score = recency × 0.5 + authority × 0.5`
+### 4.4 LLM Relevance (P7.2)
+预计算 LLM 相关度分数：
+1. 逐条调用 LLM (STANDARD tier)，结合用户 Profile 评估相关度
+2. 1-5 分映射为 0.0-1.0
+3. 与 keyword match 按 0.4/0.6 加权
 
-### 4.5 Report (P4.1)
-- **Daily**: 按 created_at 过滤当日 artifact，score >= 0.6 展示
-- **Weekly**: ISO week 窗口，Top 10 + 分数分布 + 按来源汇总
+### 4.5 Score (P3.1)
+当前公式：`final_score = recency × 0.4 + authority × 0.3 + relevance × 0.3`
 
-### 4.6 Feedback (P5.1)
-Phase 1 只对 artifact 做 like/dislike/note，append-only，不影响评分。
+### 4.6 Report (P4.1, P4.3)
+- **Daily**: 博客推荐（近 3 天未读，最多 5 篇）+ 论文动态提示
+- **Landscape**（替换原 Weekly）: 研究前沿地图 + 趋势洞察 + 候选方向 + 推荐阅读
+
+### 4.7 Feedback (P5.1)
+对 artifact / theme / direction 做 like/dislike/note/read，append-only。
+
+### 4.8 Intelligence Layer (Phase 3)
+
+在 score 之后追加智能分析链，详见 `09_intelligence_layer.md`：
+
+1. **Deep Analyze (L2)**: 对高相关论文生成结构化深度分析（问题/方法/贡献/局限/开放问题）
+2. **Cluster**: 将论文按研究子领域聚类，生成 Theme 记录
+3. **Trend Analyze**: 为每个 Theme 计算趋势指标和方法论演进
+4. **Synthesize Directions**: 综合 Theme 全景 + Profile，输出 2-3 个候选研究方向
 
 ---
 
 ## 5. Execution Model
 
 分阶段 pipeline，CLI 驱动：
+
+日常运行（daily）：
 ```
-crawl → normalize → enrich → score → report
+crawl → normalize → enrich → llm-relevance → score → daily-report
+```
+
+完整智能分析（weekly，`run --full`）：
+```
+crawl → normalize → enrich → llm-relevance → score → deep-analyze → cluster → trend → synthesize → landscape-report
 ```
 
 每个阶段有明确输入输出，可单独运行，可重跑。
@@ -100,13 +127,17 @@ crawl → normalize → enrich → score → report
 ### Must Persist
 - Raw JSON（原始数据）
 - Artifact（结构化内容）
+- Theme（研究子领域聚类快照）
+- CandidateDirection（候选研究方向）
 - FeedbackEvent（用户反馈，append-only）
 - Profile（用户画像，snapshot）
 - Report（Markdown 文件）
 
 ### Recomputable
-- summary / tags（LLM 输出，可带 cache 重算）
+- summary_l1 / tags（LLM 输出，可带 cache 重算）
+- summary_l2（L2 深度分析，可重算）
 - scores（评分，可重算）
+- Theme / CandidateDirection（可重新生成，但 CORE 状态的 Theme 需保留）
 
 ---
 
