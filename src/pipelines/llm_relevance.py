@@ -87,7 +87,7 @@ class LLMRelevancePipeline(BasePipeline):
         session_factory: sessionmaker[Session] | None = None,
         llm_client: LLMClient | Any | None = None,
         prompt_template_path: Path | None = None,
-        relevance_version: str = "v2",
+        relevance_version: str = "v3",
         max_workers: int = 8,
     ) -> None:
         """Initialize the pipeline dependencies."""
@@ -331,7 +331,7 @@ class LLMRelevancePipeline(BasePipeline):
     def _parse_score_response(self, response_text: str) -> int:
         """Parse one LLM JSON response and return the raw 1-5 score."""
 
-        cleaned = self._strip_code_fences(response_text)
+        cleaned = self._extract_json_payload(response_text)
         try:
             payload = json.loads(cleaned)
         except json.JSONDecodeError as exc:
@@ -357,4 +357,27 @@ class LLMRelevancePipeline(BasePipeline):
         if candidate.startswith("```"):
             candidate = re.sub(r"^```(?:json)?\s*", "", candidate)
             candidate = re.sub(r"\s*```$", "", candidate)
+        return candidate.strip()
+
+    def _extract_json_payload(self, response_text: str) -> str:
+        """Extract the first JSON object from one LLM response."""
+
+        candidate = self._strip_code_fences(response_text)
+        if candidate.startswith("{") and candidate.endswith("}"):
+            return candidate
+
+        fenced_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", response_text, flags=re.DOTALL)
+        if fenced_match:
+            return fenced_match.group(1).strip()
+
+        decoder = json.JSONDecoder()
+        for index, char in enumerate(candidate):
+            if char != "{":
+                continue
+            try:
+                _, end = decoder.raw_decode(candidate[index:])
+            except json.JSONDecodeError:
+                continue
+            return candidate[index : index + end].strip()
+
         return candidate.strip()

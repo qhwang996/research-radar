@@ -32,7 +32,7 @@ class StubLLMClient:
 
         self.calls.append({"prompt": prompt, **kwargs})
         cache_key = str(kwargs.get("cache_key") or "")
-        if cache_key.startswith("relevance_v2_"):
+        if cache_key.startswith("relevance_v3_"):
             return json.dumps({"score": 4, "reason": "Highly relevant to web security."})
         return json.dumps(
             {

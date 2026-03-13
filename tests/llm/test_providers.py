@@ -270,6 +270,8 @@ class GeminiProviderTestCase(unittest.TestCase):
             [{"role": "user", "parts": [{"text": "Score this artifact"}]}],
         )
         self.assertEqual(session.calls[0]["json"]["generationConfig"]["maxOutputTokens"], 128)
+        self.assertEqual(session.calls[0]["json"]["generationConfig"]["responseMimeType"], "application/json")
+        self.assertEqual(session.calls[0]["json"]["generationConfig"]["thinkingConfig"], {"thinkingBudget": 0})
         self.assertEqual(session.calls[0]["timeout"], 12.0)
 
     def test_default_model_map_prefers_more_capable_standard_model(self) -> None:
