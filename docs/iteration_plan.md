@@ -398,14 +398,15 @@
 - Top 10 以 web 安全直接相关论文为主
 
 **已知问题**：
-- abstract 缺失（3322/4116）导致 LLM 只靠标题+summary_l1 判断
 - CCS 无 abstract（DBLP 不提供），需后续补 ACM DL 抓取
-- 2 条 fenced JSON 解析失败需人工恢复
+- S&P 无独立论文详情页，abstract 需从 IEEE Xplore 获取
 
-### 爬虫增强：abstract 抓取 ✅ 已完成（2026-03-12）
-- NDSS + USENIX Security 详情页抓取 abstract，节流 0.5s/请求
+### 爬虫增强：abstract 抓取 ✅ 已完成（2026-03-13）
+- NDSS 详情页抓取 abstract：794/794 (100%)
+- USENIX Security 详情页抓取 abstract：1550/1556 (99.6%)，CSS selector 修复后重爬完成
 - S&P 和 CCS 暂不支持（S&P 无独立论文页，CCS 的 DBLP 无 abstract）
-- 当前 abstract 覆盖：794/4116（仅 NDSS 有）
+- 当前 abstract 覆盖：2344/3925 (60%)
+- LLM relevance 已升级到 v3（利用 abstract 重评全量 3925 条）
 
 ### CCS 非 full-paper 过滤 ✅ 已完成（2026-03-12）
 - 爬虫层正则过滤 workshop/poster/demo/tutorial/keynote/panel
@@ -432,10 +433,11 @@
 - Relevance 分档：高相关 233 / 中等 471 / 低相关 3221
 - 测试 106 passed（+3 新测试）
 
-### USENIX abstract 爬虫修复 ✅ 已完成（2026-03-12）
+### USENIX abstract 爬虫修复 + 重爬 ✅ 已完成（2026-03-13）
 - CSS selector 修复：`div.field--name-...`（双横线）→ `div.field-name-...`（单横线）
-- 新增单测 + 容错测试
-- 尚未重新爬取（待下次 session）
+- 重爬完成：1550/1556 有 abstract (99.6%)
+- LLM relevance v3 全量重评完成（3925 条）
+- JSON 解析容错增强（_extract_json_payload）
 
 ---
 
@@ -465,15 +467,31 @@
 
 ## Phase 2 持续运行能力
 
-**新增模块**：
-- Evolution Tracker（追踪热度变化）
-- L2/L3摘要生成
-- 关联发现
-- 调度器（自动运行）
+**已完成**：
 - P7.2 LLM Relevance Scoring ✅
 - P4.2 报告改版 ✅
+- USENIX abstract 重爬 + v3 relevance ✅
 
-**预估时间**：1-2周
+**进行中 / 近期计划**：
+
+### Phase 2a：博客源 live 验证（当前优先）⬜
+1. 逐个 live 验证 3 个已有博客爬虫（PortSwigger、Project Zero、Cloudflare）
+2. 修复 HTML selector 漂移问题（如有）
+3. 博客数据走完全流程：crawl → normalize → enrich → llm-relevance → score → report
+4. 验证博客在报告中的排序和呈现是否合理
+
+### Phase 2b：GitHub Advisory 爬虫 ⬜
+1. 实现 GitHub Advisory 爬虫（GraphQL API）
+2. 接入 normalize pipeline
+3. authority 打分暂用 CVSS 映射
+
+### Phase 2c：调度器 ⬜
+在 Phase 2a/2b 完成、日更数据源就绪后实现。详见 `docs/design/05_source_plan.md` 第 6 节。
+
+**后续模块**：
+- Evolution Tracker（追踪热度变化）
+- 主题聚类视图
+- L2/L3 摘要生成
 
 ---
 
