@@ -14,7 +14,7 @@ from src.models.enums import FeedbackType
 @click.option(
     "--type",
     "feedback_type_raw",
-    type=click.Choice(["like", "dislike", "note"], case_sensitive=False),
+    type=click.Choice(["like", "dislike", "note", "read"], case_sensitive=False),
     required=True,
     help="Feedback type.",
 )

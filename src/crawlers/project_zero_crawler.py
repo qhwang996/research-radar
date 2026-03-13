@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import re
 from typing import Any
+from urllib.parse import urlparse, urlunparse
 
 from bs4 import BeautifulSoup
 
-from src.crawlers.base import BlogCrawler, clean_text, parse_date_to_iso
+from src.crawlers.base import BlogCrawler, clean_text, parse_date_to_iso, split_authors
 
 
 class ProjectZeroCrawler(BlogCrawler):
@@ -15,12 +16,14 @@ class ProjectZeroCrawler(BlogCrawler):
 
     source_name = "Google Project Zero"
     source_slug = "project_zero"
-    listing_url = "https://googleprojectzero.blogspot.com/"
+    listing_url = "https://projectzero.google/"
 
     def fetch_articles(self, limit: int = 20) -> list[dict[str, Any]]:
         """Fetch recent Project Zero posts."""
 
-        html = self.fetch_url(self.listing_url)
+        response = self.fetch_response(self.listing_url)
+        response.encoding = response.apparent_encoding or response.encoding or "utf-8"
+        html = response.text
         articles = self.parse_articles_page(html, source_url=self.listing_url)
         return articles[:limit]
 
@@ -30,8 +33,8 @@ class ProjectZeroCrawler(BlogCrawler):
         soup = BeautifulSoup(html, "html.parser")
         articles: list[dict[str, Any]] = []
 
-        for post in soup.select(".post-outer, .date-posts .post, article.grid"):
-            title_node = post.select_one("h3.post-title a, .post-title a")
+        for post in soup.select("article.grid, .post-outer, .date-posts .post"):
+            title_node = post.select_one(".post-title > a, h3.post-title a, .post-title a")
             if not title_node:
                 continue
 
@@ -40,34 +43,32 @@ class ProjectZeroCrawler(BlogCrawler):
                 continue
 
             date_text = ""
-            date_node = post.select_one("h2.date-header span, h2.date-header, time")
+            date_node = post.select_one(".post-meta .post-date, .post-date, h2.date-header span, h2.date-header, time")
             if date_node:
                 date_text = clean_text(date_node.get_text(" ", strip=True))
 
+            published_at = parse_date_to_iso(date_text, ["%Y-%b-%d", "%A, %B %d, %Y"])
             if not date_text:
                 href = title_node.get("href", "")
                 match = re.search(r"/(\d{4})/(\d{2})/", href)
                 if match:
                     date_text = f"{match.group(1)}-{match.group(2)}-01"
+                    published_at = date_text
 
-            author_text = clean_text(
-                post.select_one(".post-author .fn, .post-header-line-1 .fn, .fn").get_text(" ", strip=True)
-                if post.select_one(".post-author .fn, .post-header-line-1 .fn, .fn")
-                else ""
-            )
-            excerpt_node = post.select_one(".post-body")
-
-            published_at = parse_date_to_iso(date_text, ["%A, %B %d, %Y"])
             if not published_at and re.match(r"\d{4}-\d{2}-\d{2}", date_text):
                 published_at = date_text
+
+            author_node = post.select_one(".post-meta .post-author, .post-author, .post-author .fn, .post-header-line-1 .fn, .fn")
+            author_text = clean_text(author_node.get_text(" ", strip=True) if author_node else "")
+            excerpt_node = post.select_one("section.post-content-snippet p, .post-content-snippet p, .post-body p, .post-body")
 
             articles.append(
                 {
                     "title": title,
-                    "authors": [author_text] if author_text else [],
+                    "authors": split_authors(author_text),
                     "published_at": published_at,
                     "source_url": source_url,
-                    "article_url": self.to_absolute_url(source_url, title_node.get("href")),
+                    "article_url": self._normalize_article_url(source_url, title_node.get("href")),
                     "excerpt": clean_text(excerpt_node.get_text(" ", strip=True)) if excerpt_node else None,
                     "tags": [],
                     "source_type": "blogs",
@@ -75,3 +76,24 @@ class ProjectZeroCrawler(BlogCrawler):
             )
 
         return articles
+
+    def _normalize_article_url(self, source_url: str, href: str | None) -> str | None:
+        """Normalize article URLs onto the current Project Zero site host."""
+
+        article_url = self.to_absolute_url(source_url, href)
+        if not article_url:
+            return None
+
+        source_parts = urlparse(source_url)
+        article_parts = urlparse(article_url)
+        if article_parts.netloc.lower() == source_parts.netloc.lower():
+            return article_url
+        if not article_parts.path.startswith("/20"):
+            return article_url
+
+        return urlunparse(
+            article_parts._replace(
+                scheme=source_parts.scheme or article_parts.scheme,
+                netloc=source_parts.netloc or article_parts.netloc,
+            )
+        )

@@ -80,6 +80,48 @@ class FeedbackCliTestCase(unittest.TestCase):
         self.assertEqual(event.content["type"], "dislike")
         self.assertEqual(event.content["note"], "Not relevant")
 
+    def test_feedback_read_creates_event_without_note(self) -> None:
+        """A read feedback should persist without requiring note text."""
+
+        artifact = self._save_artifact("Artifact Read")
+
+        result = self.runner.invoke(
+            cli,
+            ["--database-url", self.database_url, "feedback", "--artifact-id", str(artifact.id), "--type", "read"],
+        )
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        event = self._list_feedback_events(str(artifact.id))[0]
+        self.assertEqual(event.feedback_type, FeedbackType.READ)
+        self.assertEqual(event.content["type"], "read")
+        self.assertNotIn("note", event.content)
+
+    def test_feedback_read_accepts_optional_note(self) -> None:
+        """A read feedback may include an optional note."""
+
+        artifact = self._save_artifact("Artifact Read Note")
+
+        result = self.runner.invoke(
+            cli,
+            [
+                "--database-url",
+                self.database_url,
+                "feedback",
+                "--artifact-id",
+                str(artifact.id),
+                "--type",
+                "read",
+                "--note",
+                "好文",
+            ],
+        )
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        event = self._list_feedback_events(str(artifact.id))[0]
+        self.assertEqual(event.feedback_type, FeedbackType.READ)
+        self.assertEqual(event.content["type"], "read")
+        self.assertEqual(event.content["note"], "好文")
+
     def test_feedback_note_requires_text(self) -> None:
         """A note feedback without --note should fail validation."""
 

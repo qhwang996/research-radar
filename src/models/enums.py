@@ -29,6 +29,7 @@ class FeedbackType(str, Enum):
     PROS = "pros"
     CONS = "cons"
     NOTE = "note"
+    READ = "read"
 
 
 class SourceType(str, Enum):
