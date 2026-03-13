@@ -14,7 +14,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from src.db.session import SessionLocal
 from src.models.artifact import Artifact
-from src.models.enums import ArtifactStatus
+from src.models.enums import ArtifactStatus, FeedbackTargetType, FeedbackType
+from src.models.feedback import FeedbackEvent
 from src.repositories.artifact_repository import ArtifactRepository
 
 logger = logging.getLogger(__name__)
@@ -107,6 +108,25 @@ class BaseReportGenerator(ABC):
             .where(Artifact.final_score.is_(None))
         )
         return int(session.scalar(statement) or 0)
+
+    def _load_read_artifact_ids(self) -> set[int]:
+        """Return artifact IDs that have been marked as read."""
+
+        session = self.session_factory()
+        try:
+            statement = select(FeedbackEvent.target_id).where(
+                FeedbackEvent.target_type == FeedbackTargetType.ARTIFACT,
+                FeedbackEvent.feedback_type == FeedbackType.READ,
+            )
+            read_ids: set[int] = set()
+            for target_id in session.scalars(statement):
+                try:
+                    read_ids.add(int(target_id))
+                except (TypeError, ValueError):
+                    logger.warning("Skipping non-integer read feedback target_id=%r", target_id)
+            return read_ids
+        finally:
+            session.close()
 
     def _write_report(self, subdirectory: str, filename: str, content: str) -> Path:
         """Write a rendered report to disk and return its path."""
