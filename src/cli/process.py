@@ -1,4 +1,4 @@
-"""Normalization, enrichment, scoring, and full-run CLI commands."""
+"""Normalization, enrichment, analysis, clustering, scoring, and full-run CLI commands."""
 
 from __future__ import annotations
 
@@ -11,6 +11,8 @@ import click
 from src.cli.crawl import _crawl_all_sources
 from src.cli.main import AppContext, handle_command_errors, parse_date_option, pass_app_context
 from src.llm import LLMClient
+from src.pipelines.clustering import ClusteringPipeline
+from src.pipelines.deep_analysis import DeepAnalysisPipeline
 from src.pipelines.enrichment import EnrichmentPipeline
 from src.pipelines.llm_relevance import LLMRelevancePipeline
 from src.pipelines.normalization import NormalizationPipeline
@@ -98,6 +100,62 @@ def llm_relevance_command(app: AppContext, provider: str, artifact_id: int | Non
         max_workers=workers,
     ).process(artifact_id)
     click.echo(f"LLM relevance scored {len(artifacts)} artifacts")
+
+
+@click.command("deep-analyze")
+@click.option(
+    "--provider",
+    type=click.Choice(["openai", "anthropic", "gemini"], case_sensitive=False),
+    default="anthropic",
+    show_default=True,
+    help="LLM provider to use for deep analysis.",
+)
+@click.option("--artifact-id", type=int, default=None, help="Target a specific artifact by DB id.")
+@click.option("--workers", type=click.IntRange(1), default=4, show_default=True, help="Number of LLM worker threads.")
+@click.option("--min-relevance", type=float, default=0.6, show_default=True, help="Minimum relevance threshold.")
+@pass_app_context
+@handle_command_errors
+def deep_analyze_command(
+    app: AppContext,
+    provider: str,
+    artifact_id: int | None,
+    workers: int,
+    min_relevance: float,
+) -> None:
+    """Generate structured L2 deep analysis for relevant papers."""
+
+    llm_client = build_llm_client(provider)
+    artifacts = DeepAnalysisPipeline(
+        session_factory=app.session_factory,
+        llm_client=llm_client,
+        max_workers=workers,
+        min_relevance=min_relevance,
+    ).process(artifact_id)
+    click.echo(f"Deep analyzed {len(artifacts)} artifacts")
+
+
+@click.command("cluster")
+@click.option(
+    "--provider",
+    type=click.Choice(["openai", "anthropic", "gemini"], case_sensitive=False),
+    default="anthropic",
+    show_default=True,
+    help="LLM provider to use for clustering.",
+)
+@click.option("--full/--incremental", "full_mode", default=True, show_default=True, help="Run full or incremental clustering.")
+@click.option("--min-relevance", type=float, default=0.6, show_default=True, help="Minimum relevance threshold.")
+@pass_app_context
+@handle_command_errors
+def cluster_command(app: AppContext, provider: str, full_mode: bool, min_relevance: float) -> None:
+    """Group high-relevance papers into research themes."""
+
+    llm_client = build_llm_client(provider)
+    themes = ClusteringPipeline(
+        session_factory=app.session_factory,
+        llm_client=llm_client,
+        min_relevance=min_relevance,
+    ).process(None if full_mode else "incremental")
+    click.echo(f"Clustered {len(themes)} themes")
 
 
 @click.command("run")

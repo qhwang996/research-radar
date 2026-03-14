@@ -444,16 +444,19 @@ research-radar run --full --provider openai
 
 ### 8.1 LLM Tier 降级
 
-当前用户只有 Anthropic API 的 `claude-haiku-4-5-20251001` 可用（无 Sonnet/Opus 权限）。所有 pipeline 的 tier 设计（FAST/STANDARD/PREMIUM）在代码中保留逻辑分层，但**运行时统一映射到 haiku**。
+当前用户通过第三方网关访问 Anthropic API，只有 `claude-haiku-4-5-20251001` 可用（无 Sonnet/Opus 权限）。所有 pipeline 的 tier 设计（FAST/STANDARD/PREMIUM）在代码中保留逻辑分层，但**运行时统一映射到 haiku**。
 
-通过环境变量配置：
+`.env` 配置（已就绪）：
 
-```bash
-export ANTHROPIC_API_KEY="..."
-export ANTHROPIC_MODEL_FAST="claude-haiku-4-5-20251001"
-export ANTHROPIC_MODEL_STANDARD="claude-haiku-4-5-20251001"
-export ANTHROPIC_MODEL_PREMIUM="claude-haiku-4-5-20251001"
 ```
+ANTHROPIC_API_KEY=sk-...
+ANTHROPIC_BASE_URL=https://node-hk.sssaicode.com/api/v1/messages
+ANTHROPIC_MODEL_FAST=claude-haiku-4-5-20251001
+ANTHROPIC_MODEL_STANDARD=claude-haiku-4-5-20251001
+ANTHROPIC_MODEL_PREMIUM=claude-haiku-4-5-20251001
+```
+
+所有新 pipeline 使用 `--provider anthropic`。历史的 Gemini 配置保留（llm-relevance v3 曾使用），但新 pipeline 不再使用。
 
 **影响**：
 - haiku 上下文窗口足够（200K tokens），但推理能力弱于 Sonnet/Opus

@@ -4,5 +4,6 @@ from src.models.artifact import Artifact
 from src.models.feedback import FeedbackEvent
 from src.models.profile import Profile
 from src.models.raw_fetch import RawFetch
+from src.models.theme import Theme
 
-__all__ = ["Artifact", "FeedbackEvent", "Profile", "RawFetch"]
+__all__ = ["Artifact", "FeedbackEvent", "Profile", "RawFetch", "Theme"]

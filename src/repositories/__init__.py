@@ -4,5 +4,12 @@ from src.repositories.artifact_repository import ArtifactRepository
 from src.repositories.feedback_repository import FeedbackRepository
 from src.repositories.profile_repository import ProfileRepository
 from src.repositories.raw_fetch_repository import RawFetchRepository
+from src.repositories.theme_repository import ThemeRepository
 
-__all__ = ["ArtifactRepository", "FeedbackRepository", "ProfileRepository", "RawFetchRepository"]
+__all__ = [
+    "ArtifactRepository",
+    "FeedbackRepository",
+    "ProfileRepository",
+    "RawFetchRepository",
+    "ThemeRepository",
+]

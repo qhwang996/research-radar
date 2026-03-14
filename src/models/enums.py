@@ -41,6 +41,14 @@ class SourceType(str, Enum):
     BOOKMARKS = "bookmarks"
 
 
+class ThemeStatus(str, Enum):
+    """Lifecycle states for a research theme."""
+
+    CANDIDATE = "candidate"
+    CORE = "core"
+    ARCHIVED = "archived"
+
+
 class RawFetchStatus(str, Enum):
     """Lifecycle states for raw fetch tracking records."""
 
