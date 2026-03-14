@@ -57,7 +57,7 @@ class DeepAnalysisPipeline(BasePipeline):
 
 | 参数 | 值 | 说明 |
 |------|-----|------|
-| model_tier | `ModelTier.STANDARD` | 深度分析需要较强推理能力 |
+| model_tier | `ModelTier.STANDARD` | 代码保留 tier 分层，运行时通过环境变量映射到 haiku |
 | max_tokens | 1500 | 结构化 JSON 输出较长 |
 | temperature | 0.3 | 保持确定性 |
 | cache_key | `deep_analysis_{analysis_version}_{canonical_id}` | 版本化缓存 |

@@ -440,18 +440,39 @@ research-radar run --full --provider openai
 
 ---
 
-## 8. LLM 成本估算
+## 8. 运行环境配置
 
-| 阶段 | Tier | 每次 token | 调用次数 | 频率 | 估算成本 |
-|------|------|-----------|---------|------|---------|
-| L2 深度分析 | STANDARD | ~2000 in / ~800 out | ~200（首次），~5-10/周 | 增量 | 首次 $4-6，后续 $0.1-0.3/周 |
-| 聚类（分批） | STANDARD | ~4000 in / ~1000 out | 5-7 批 | 全量时 | $1-2/次 |
-| 聚类（merge） | PREMIUM | ~3000 in / ~1500 out | 1 次 | 全量时 | $0.5-1/次 |
-| 趋势分析 | STANDARD | ~3000 in / ~800 out | 10-15 Theme | 每周 | $0.5-1/周 |
-| 方向综合 | PREMIUM | ~5000 in / ~2000 out | 1 次 | 每周 | $0.5-1/周 |
+### 8.1 LLM Tier 降级
 
-**首次运行总成本**：约 $8-12（一次性 L2 分析 + 首次聚类）
-**每周运行成本**：约 $2-4（增量分析 + 趋势 + 方向综合）
+当前用户只有 Anthropic API 的 `claude-haiku-4-5-20251001` 可用（无 Sonnet/Opus 权限）。所有 pipeline 的 tier 设计（FAST/STANDARD/PREMIUM）在代码中保留逻辑分层，但**运行时统一映射到 haiku**。
+
+通过环境变量配置：
+
+```bash
+export ANTHROPIC_API_KEY="..."
+export ANTHROPIC_MODEL_FAST="claude-haiku-4-5-20251001"
+export ANTHROPIC_MODEL_STANDARD="claude-haiku-4-5-20251001"
+export ANTHROPIC_MODEL_PREMIUM="claude-haiku-4-5-20251001"
+```
+
+**影响**：
+- haiku 上下文窗口足够（200K tokens），但推理能力弱于 Sonnet/Opus
+- 方向综合（原设计 PREMIUM）的输出质量可能受限，需通过 prompt 工程弥补
+- 成本大幅降低（haiku 价格约为 Sonnet 的 1/10）
+- 代码中的 `ModelTier.STANDARD` / `ModelTier.PREMIUM` 标注保持不变，后续升级只需改环境变量
+
+### 8.2 成本估算（基于 haiku）
+
+| 阶段 | 设计 Tier | 实际模型 | 每次 token | 调用次数 | 估算成本 |
+|------|----------|---------|-----------|---------|---------|
+| L2 深度分析 | STANDARD | haiku | ~2000 in / ~800 out | ~200（首次） | ~$0.15 |
+| 聚类（分批） | STANDARD | haiku | ~4000 in / ~1000 out | 5-7 批 | ~$0.05 |
+| 聚类（merge） | PREMIUM | haiku | ~3000 in / ~1500 out | 1 次 | ~$0.01 |
+| 趋势分析 | STANDARD | haiku | ~3000 in / ~800 out | 10-15 Theme | ~$0.05 |
+| 方向综合 | PREMIUM | haiku | ~5000 in / ~2000 out | 1 次 | ~$0.01 |
+
+**首次运行总成本**：约 $0.3（haiku 定价极低）
+**每周运行成本**：约 $0.1
 
 全部结果通过 `FileLLMCache` 缓存，重跑不产生额外成本。
 
