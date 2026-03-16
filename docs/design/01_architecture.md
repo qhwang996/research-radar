@@ -52,8 +52,8 @@ research-radar/
 ├── src/
 │   ├── models/          # SQLAlchemy ORM 模型
 │   ├── repositories/    # Repository 层（CRUD 封装）
-│   ├── crawlers/        # 爬虫（四大顶会 + 3 博客）
-│   ├── pipelines/       # Normalization + Enrichment + Deep Analysis + Clustering + Trend + Direction Synthesis
+│   ├── crawlers/        # 爬虫（四大顶会 + arXiv + 3 博客）
+│   ├── pipelines/       # Normalization + Enrichment + LLM Relevance + Deep Analysis + Clustering + Trend + Signal Extraction + Gap Detection + Direction Synthesis
 │   ├── scoring/         # 评分引擎（Recency + Authority + Relevance）
 │   ├── reporting/       # Daily / Landscape 报告生成
 │   ├── llm/             # LLM 客户端（provider + cache + retry）

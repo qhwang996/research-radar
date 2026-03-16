@@ -503,85 +503,82 @@
 
 ### P3a：L2 深度分析 ✅ 已完成
 - DeepAnalysisPipeline（学术轨，论文 L2 结构化分析）
-- 137 tests passed
 
 ### P3b：主题聚类 ✅ 已完成
 - Theme 模型 + ClusteringPipeline（学术轨，论文聚类）
-- 137 tests passed
 
-### Phase A：基础改造（当前优先）
+### Phase A：基础改造 ✅ 已完成（2026-03-16）
 
-**A1: SourceTier 正式化 + 数据迁移** ⬜
-- 新增 SourceTier / InformationTrack 枚举
-- 已有数据 tier 值迁移（`"top-tier"` → `"t1-conference"` 等）
-- 修改 normalization / authority / recency 使用新枚举
+**A1: SourceTier 正式化 + 数据迁移** ✅
+- SourceTier / InformationTrack / DirectionStatus 枚举
+- 分轨评分 CompositeStrategy（学术轨 0.5/0.3/0.2，工业轨 0.5/0.4/0.1）
+- `migrate-tiers` CLI 命令
+- authority / recency 策略更新
 
-**A2: Profile V2 + 宽泛相关度** ⬜
-- seed_profile_v2.json（清空 preferred_topics，新增 domain_scope / direction_preferences）
+**A2: Profile V2 + 宽泛相关度** ✅
+- seed_profile_v2.json（preferred_topics 清空，新增 domain_scope / direction_preferences）
 - relevance_score_v4.md（宽泛领域过滤 prompt）
-- RelevanceStrategy 处理空 preferred_topics
-- LLMRelevancePipeline bump v4
-- 全量 re-score ~4000 条（Haiku 成本 ~$0.50）
+- RelevanceStrategy 处理空 preferred_topics（跳过 keyword match，纯 LLM）
+- LLMRelevancePipeline bump v4，自动选择 v4 prompt
+- `profile seed-v2` CLI 命令
 
-**A3: arXiv 爬虫** ⬜
+**A3: arXiv 爬虫** ✅
 - ArxivCrawler（cs.CR + cs.SE + cs.PL，Atom XML API）
-- 12 个月增量爬取，每请求 3 秒间隔
+- 分页、3 秒 rate limit、年份过滤
 - 注册到 registry
 
-### Phase B：工业信号轨道
+### Phase B：工业信号轨道 ✅ 已完成（2026-03-16）
 
-**B1: 需求信号提取** ⬜
-- SignalExtractionPipeline（工业轨，博客 → 结构化需求信号）
+**B1: 需求信号提取** ✅
+- SignalExtractionPipeline（博客 → 结构化需求信号 JSON）
 - prompts/extract_demand_signal.md
 - CLI `extract-signals`
 
-**B2: 分轨评分** ⬜
-- TrackRouter（按 source_tier 分流）
-- CompositeStrategy 分轨权重
-- 学术轨：domain_relevance×0.5 + recency×0.3 + authority×0.2
-- 工业轨：recency×0.5 + domain_relevance×0.4 + authority×0.1
+**B2: 分轨路由** ✅
+- TrackRouter（split_by_track 按 source_tier 分流）
+- CompositeStrategy 已在 A1 实现分轨权重
 
-### Phase C：空白检测（核心产出）
+### Phase C：空白检测（核心产出）✅ 已完成（2026-03-16）
 
-**C1: 空白检测** ⬜
-- ResearchGap 模型 + Repository
-- GapDetectionPipeline（统计交叉比对 + 可选 LLM 验证）
+**C1: 空白检测** ✅
+- ResearchGap 模型 + ResearchGapRepository
+- GapDetectionPipeline（统计交叉比对学术覆盖 vs 工业需求）
 - CLI `detect-gaps`
 
-**C2: 方向综合改造** ⬜
-- CandidateDirection 模型 + Repository
+**C2: 方向综合** ✅
+- CandidateDirection 模型 + CandidateDirectionRepository
 - DirectionSynthesisPipeline（基于 ResearchGap + Profile.direction_preferences）
+- prompts/synthesize_from_gaps.md
 - CLI `synthesize`
 
-**C3: Landscape 报告** ⬜
+**C3: Landscape 报告** ✅
 - LandscapeReportGenerator（含空白分析 section）
-- `run --full` 串联全流程
-- theme/direction 反馈 CLI
+- `run --full` 串联完整分析链
+- `report --type landscape` CLI
 
 ### Phase D：趋势 + 反馈
 
-**D1: 统计趋势分析** ⬜
-- TrendAnalysisPipeline（定量统计 + 可选定性 LLM）
-- arXiv 新关键词涌现检测
+**D1: 统计趋势分析** ✅ 已完成（2026-03-16）
+- TrendAnalysisPipeline（定量 trend_direction + 可选 LLM 定性分析）
+- prompts/analyze_theme_trend.md
+- CLI `trend`，集成到 `run --full`
 
 **D2: 反馈闭环** ⬜
-- ProfileSignalPipeline
+- ProfileSignalPipeline（从反馈历史提取偏好模式，更新 Profile）
 
 ---
 
-## 优先级排序（2026-03-16 更新）
+## 优先级排序（2026-03-16 最终更新）
 
-1. **Phase A 基础改造**（SourceTier + Profile V2 + arXiv）— 为双轨架构打基础
-2. **Phase B 工业信号轨道**（需求信号提取 + 分轨评分）— 建立工业轨
-3. **Phase C 空白检测**（核心创新：学术覆盖 vs 工业需求 的交叉比对）
-4. **Phase D 趋势 + 反馈**
-5. **Phase 2 数据质量**（S&P TLS、CCS abstract）— 降优
+**已完成**：Phase A + B + C + D1（v2 双轨架构全部实现）
 
-### 指导原则
-- **发现未知 > 过滤已知**：Profile 放宽，让系统帮用户发现不知道自己会感兴趣的方向
-- **分轨处理 > 拍平排序**：不同来源有不同作用，不应混排
-- **统计信号 > 纯 LLM 推理**：空白检测用统计方法，对 Haiku 质量有天然容错
-- **增量验证**：A 完成就能看到放宽后的效果，B 完成能看到需求信号，C 完成才是完整产出
+**待做**：
+1. **live 验证**：`migrate-tiers` → `profile seed-v2` → `run --full --provider anthropic`
+2. **D2 反馈闭环**：ProfileSignalPipeline
+3. **Phase 2 数据质量**（S&P TLS、CCS abstract）
+4. **T4 源接入**：用户后续提供个人博客/公众号 URL
+
+**当前测试**: 159 passed, 5 subtests passed
 
 ---
 

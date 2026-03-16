@@ -96,7 +96,9 @@
 `data/reports/weekly/YYYY-WXX.md`（复用周报目录）
 
 ### 4.2 依赖
-需要智能分析层（Phase 3）就绪：Theme 聚类 + 趋势分析 + 候选方向。详见 `09_intelligence_layer.md`。
+需要智能分析层（Phase 3 v2）就绪：Theme 聚类 + 趋势分析 + 空白检测 + 候选方向。详见 `09_intelligence_layer.md`。
+
+> **实现状态 (2026-03-16)**：`src/reporting/landscape.py` 已实现，包含空白分析 section。通过 `report --type landscape` 或 `run --full` 生成。
 
 ### 4.3 报告结构
 
@@ -136,6 +138,18 @@
 ### 研究空白
 - **空白 1**: 多篇论文提到但未解决...
 - **空白 2**: ...
+
+---
+
+## 学术-工业空白分析
+
+以下是工业界已在关注但学术界尚未充分解决的领域：
+
+### 空白 1: [Topic]  (gap_score: X.XX)
+- **工业需求**: N 个独立来源提到
+  - [Blog A] (PortSwigger) — 描述...
+- **学术覆盖**: 当前覆盖度 XX%
+- **空白性质**: 为什么这是一个研究机会
 
 ---
 
@@ -186,10 +200,11 @@
 
 1. **研究前沿地图**：从 `themes` 表加载所有 `status IN (candidate, core)` 的 Theme，按 `artifact_count` 降序排列
 2. **趋势洞察**：从 Theme 的 `trend_direction`、`methodology_tags`、`open_questions` 提取
-3. **候选方向**：从 `candidate_directions` 表加载当周或最近的 `status == active` 方向
-4. **推荐阅读**：收集所有候选方向的 `supporting_artifact_ids`，去重后按 `final_score` 降序，排除已读
-5. **博客回顾**：本周新增 BLOGS 类型 artifact，表格形式展示
-6. 已读过滤：所有推荐列表排除 `FeedbackType.READ` 标记的 artifact
+3. **学术-工业空白分析**：从 `research_gaps` 表加载 `status == active` 的空白，按 `gap_score` 降序
+4. **候选方向**：从 `candidate_directions` 表加载 `status == active` 方向
+5. **推荐阅读**：全库未读高分论文，按 `final_score` 降序排列
+6. **博客回顾**：近期 BLOGS 类型 artifact，表格形式展示
+7. 已读过滤：所有推荐列表排除 `FeedbackType.READ` 标记的 artifact
 
 ### 4.5 原周报（Deprecated）
 

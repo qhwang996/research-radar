@@ -240,13 +240,23 @@
 raw_data
    ↓
 artifact ──→ theme ──→ candidate_direction
-   ↓           ↓              ↓
-feedback ← ─ ─ ┴ ─ ─ ─ ─ ─ ─ ┘
+   ↓           ↓              ↑
+   ↓           ↓         research_gap
+   ↓           ↓          ↗       ↖
+   ↓     (学术轨聚类)  (空白检测交叉比对)
+   ↓                         ↑
+feedback ← ─ ─ ─ ─ ─ ─ ─ ─ ─ ┘
    ↓
 user_profile (学习偏好)
    ↓
 (影响后续artifact评分)
 ```
+
+> **v2 新增实体 (2026-03-16)**:
+> - `research_gap`：学术-工业空白检测结果。字段详见 `09_intelligence_layer.md` Section 3.4。
+> - `candidate_direction` 新增 `gap_id`, `gap_score`, `barrier_score` 字段。
+> - `user_profile` 新增 `domain_scope`, `direction_preferences` 字段。
+> - 实际 ORM 模型以 `src/models/` 下的代码为准。
 
 ---
 

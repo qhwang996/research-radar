@@ -1,96 +1,90 @@
 # Research Radar
 
-一个面向安全领域博士研究选题的长期收敛系统。
+面向安全领域博士研究选题的研究方向发现系统。
 
-它的目标不是泛化地“帮我看资讯”或“自动想 idea”，而是围绕未来 3–5 年值得投入的安全研究方向，持续收集多源信号、形成候选方向、记录我的判断，并在长期运行中逐步收敛出更值得做的博士主线。
+系统通过**双轨处理 + 统计空白检测**，从多层信息源中发现「工业界已在痛但学术界尚未充分解决」的研究空白，帮助用户找到高门槛、低竞争、有实际影响力的研究方向。
 
-## Core Goal
+## 架构概览
 
-系统每周输出 3 个候选研究方向，并通过我的反馈（pros / cons / unknown / next action）持续学习我的研究偏好。
+```
+                      Ingest
+                 crawl → normalize → enrich(L1) → broad domain filter
+                           |
+             +-------------+-------------+
+             |                           |
+        ACADEMIC TRACK              INDUSTRY TRACK
+        (T1 顶会 + T2 arXiv)       (T3 博客 + T4 未来快速源)
+             |                           |
+        L2 deep-analyze             signal-extract
+             |                           |
+        cluster → trend             demand signal 聚合
+             |                           |
+             +--- GAP DETECTOR ----------+
+                       |
+                DIRECTION SYNTHESIS → LANDSCAPE REPORT
+```
 
-## Why this system exists
+## 数据源
 
-我需要的不是一个信息聚合器，而是一个“研究方向收敛器”：
+| Tier | 来源 | 信号类型 | 状态 |
+|------|------|---------|------|
+| T1 | NDSS, S&P, CCS, USENIX Security | 学术覆盖 | ✅ |
+| T2 | arXiv (cs.CR + cs.SE + cs.PL) | 趋势萌芽 | ✅ |
+| T3 | Project Zero, PortSwigger, Cloudflare | 工业需求 | ✅ |
+| T4 | 个人博客 / 公众号 | 快速热点 | 待接入 |
 
-- 以高质量安全论文为核心输入
-- 以前沿安全博客、漏洞报告、技术通告为现实世界补强
-- 以个人收藏和后续平台为个性化补充
-- 保留中间产物，支持频繁修改规则、重跑、比较新旧结果
-- 帮助我判断哪些方向值得继续投入，哪些只值得观察，哪些应当放弃
+## 核心 Pipeline
 
-## MVP Goal
+| Pipeline | 作用 | 轨道 |
+|----------|------|------|
+| `deep-analyze` | 论文 L2 结构化分析 | 学术 |
+| `cluster` | 论文按研究子领域聚类 | 学术 |
+| `trend` | 趋势统计 + 方法论演进分析 | 学术 |
+| `extract-signals` | 从博客提取需求信号 | 工业 |
+| `detect-gaps` | 学术覆盖 vs 工业需求的交叉比对 | 交叉 |
+| `synthesize` | 基于空白推导候选研究方向 | 综合 |
 
-首版目标：
+## 快速使用
 
-1. 接收多类输入源（paper / blog / advisory / bookmark）
-2. 把输入统一归一化为 artifact
-3. 每周生成 3 个 candidate directions
-4. 生成 markdown weekly shortlist
-5. 记录我的反馈
-6. 下一轮排序能体现反馈影响
-7. 保留关键中间产物，支持 replay 和 compare
+```bash
+# 环境
+conda activate research-radar
 
-## Non-goals
+# 首次设置
+python -m src.cli profile seed-v2          # 加载宽泛 Profile
+python -m src.cli migrate-tiers            # 迁移 tier 值
 
-首版明确不做：
+# 日常运行
+python -m src.cli run --skip-crawl --provider anthropic --report-type daily
 
-- Web UI
-- 多用户支持
-- 复杂分布式架构
-- 完整知识图谱
-- 很重的 agent framework / LangGraph orchestration
-- “一次性自动生成完美博士题目”
+# 完整智能分析（每周）
+python -m src.cli run --skip-crawl --full --provider anthropic
 
-## Core Output
+# 单步命令
+python -m src.cli deep-analyze --provider anthropic
+python -m src.cli extract-signals --provider anthropic
+python -m src.cli cluster --provider anthropic
+python -m src.cli trend --provider anthropic
+python -m src.cli detect-gaps
+python -m src.cli synthesize --provider anthropic
+python -m src.cli report --type landscape
+```
 
-系统输出分三层：
+## 项目状态
 
-- Daily Radar：少量新增观察
-- Weekly Shortlist：每周 3 个候选方向
-- Monthly Convergence：continue / watch / drop 的方向收敛结果
+- **测试**: 159 passed, 5 subtests passed
+- **数据**: 3980 artifacts (论文 3925 + 博客 55)
+- **v2 架构**: Phase A-D1 全部实现
+- **待做**: live 验证、D2 反馈闭环、T4 源接入
 
-## Core Principles
+## 设计文档
 
-1. Papers first  
-   论文是主轴，尤其是高质量安全论文。
+- `docs/design/01_architecture.md` — 架构与数据流
+- `docs/design/03_scoring_strategy.md` — 分轨评分策略
+- `docs/design/05_source_plan.md` — 数据源计划
+- `docs/design/09_intelligence_layer.md` — 智能分析层（v2 双轨架构，核心设计）
+- `docs/iteration_plan.md` — 迭代计划与进度
 
-2. Evidence over impressions  
-   每个方向必须有证据链，而不是只靠摘要式印象。
+## 技术栈
 
-3. Preserve intermediates  
-   中间产物必须保留，便于重跑、比较和回溯。
-
-4. Idempotent by design  
-   长期运行系统必须考虑幂等、去重、恢复和 replay。
-
-5. Weekly convergence, not information overload  
-   目标不是给很多内容，而是给很少但值得思考的方向。
-
-## Proposed Repo Layout
-
-```text
-research-topic-system/
-  README.md
-  .env.example
-
-  docs/
-    00_project_charter.md
-    01_scope_and_non_goals.md
-    02_requirements.md
-    03_architecture_overview.md
-    04_data_flow.md
-    05_data_dictionary.md
-    06_idempotency_and_replay.md
-    07_scoring_strategy.md
-    08_report_spec.md
-    09_source_plan.md
-    10_feedback_spec.md
-    11_iteration_plan.md
-    12_risks_and_open_questions.md
-
-  schemas/
-  samples/
-  prompts/
-  reports/
-  scripts/
-  src/
+Python 3.10+ / SQLAlchemy 2.0 / SQLite / Click CLI / Anthropic API (Haiku)
