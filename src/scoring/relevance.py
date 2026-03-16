@@ -33,17 +33,28 @@ class RelevanceStrategy(BaseScoringStrategy):
                 "relevance_score": NEUTRAL_RELEVANCE_SCORE,
             }
 
-        search_corpus = self._build_search_corpus(artifact)
-        preferred_match_count = self._count_topic_matches(profile.preferred_topics, search_corpus)
-        avoided_match_count = self._count_topic_matches(profile.avoided_topics, search_corpus)
-        keyword_match_score = self._score_from_match_count(preferred_match_count)
+        # When preferred_topics is empty (v2 broad profile), skip keyword match
+        # and rely entirely on LLM domain relevance.
+        has_preferred_topics = bool(profile.preferred_topics)
+
+        if has_preferred_topics:
+            search_corpus = self._build_search_corpus(artifact)
+            preferred_match_count = self._count_topic_matches(profile.preferred_topics, search_corpus)
+            keyword_match_score = self._score_from_match_count(preferred_match_count)
+        else:
+            keyword_match_score = None
+
+        avoided_match_count = self._count_topic_matches(
+            profile.avoided_topics, self._build_search_corpus(artifact)
+        ) if profile.avoided_topics else 0
+
         llm_relevance_score = self._calculate_llm_relevance_score(artifact, profile)
         relevance_score = self._merge_relevance_scores(keyword_match_score, llm_relevance_score)
         if avoided_match_count:
             relevance_score *= TOPIC_AVOIDANCE_PENALTY
 
         return {
-            "keyword_match_score": self._clamp_score(keyword_match_score),
+            "keyword_match_score": self._clamp_score(keyword_match_score) if keyword_match_score is not None else None,
             "llm_relevance_score": self._clamp_score(llm_relevance_score) if llm_relevance_score is not None else None,
             "relevance_score": self._clamp_score(relevance_score),
         }
@@ -105,9 +116,16 @@ class RelevanceStrategy(BaseScoringStrategy):
         except (TypeError, ValueError):
             return None
 
-    def _merge_relevance_scores(self, keyword_match_score: float, llm_relevance_score: float | None) -> float:
-        """Merge keyword and LLM relevance scores while LLM scoring remains optional."""
+    def _merge_relevance_scores(self, keyword_match_score: float | None, llm_relevance_score: float | None) -> float:
+        """Merge keyword and LLM relevance scores.
 
+        When keyword_match_score is None (v2 broad profile with empty preferred_topics),
+        use LLM score alone or fall back to neutral.
+        """
+
+        if keyword_match_score is None:
+            # V2 broad profile: no keyword matching, pure LLM domain filter
+            return llm_relevance_score if llm_relevance_score is not None else NEUTRAL_RELEVANCE_SCORE
         if llm_relevance_score is None:
             return keyword_match_score
         return (keyword_match_score * KEYWORD_LLM_WEIGHT) + (llm_relevance_score * LLM_RELEVANCE_WEIGHT)

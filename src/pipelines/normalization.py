@@ -30,13 +30,22 @@ logger = logging.getLogger(__name__)
 
 
 SOURCE_TIER_BY_NAME = {
-    "ndss": "top-tier",
-    "ieee s&p": "top-tier",
-    "acm ccs": "top-tier",
-    "usenix security": "top-tier",
-    "portswigger research": "high-quality-blog",
-    "google project zero": "high-quality-blog",
-    "cloudflare security blog": "high-quality-blog",
+    "ndss": "t1-conference",
+    "ieee s&p": "t1-conference",
+    "acm ccs": "t1-conference",
+    "usenix security": "t1-conference",
+    "arxiv": "t2-arxiv",
+    "portswigger research": "t3-research-blog",
+    "google project zero": "t3-research-blog",
+    "cloudflare security blog": "t3-research-blog",
+}
+
+# Legacy tier values → new tier values (for data migration)
+_LEGACY_TIER_MAP = {
+    "top-tier": "t1-conference",
+    "high-quality-blog": "t3-research-blog",
+    "blog": "t3-research-blog",
+    "paper": "t1-conference",
 }
 
 

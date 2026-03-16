@@ -1,0 +1,39 @@
+{
+  "profile_version": "v2-broad",
+  "current_research_area": "Software Security & Systems Security",
+  "interests": [
+    "Vulnerability detection",
+    "Program analysis",
+    "Fuzzing",
+    "Supply chain security",
+    "Web application security"
+  ],
+  "domain_scope": ["security", "software-engineering", "programming-languages"],
+  "preferred_topics": [],
+  "avoided_topics": [
+    "cryptography-theory",
+    "blockchain",
+    "formal-verification",
+    "privacy-policy",
+    "usable-security-survey",
+    "network-protocol-theory",
+    "quantum-computing"
+  ],
+  "direction_preferences": {
+    "barrier_level": "high",
+    "technical_depth": "deep",
+    "competition_tolerance": "low",
+    "cycle_preference": "long",
+    "impact_type": "practical"
+  },
+  "primary_goals": [
+    "找到高门槛、技术深度大、竞争少但有实际影响力的研究方向",
+    "偏好长周期有意义的工作，回避拥挤方向"
+  ],
+  "evaluation_criteria": {
+    "must_have": "明确的技术贡献或新攻击面",
+    "nice_to_have": "有原型实现或实际影响证据",
+    "dealbreaker": "纯理论无应用场景"
+  },
+  "is_active": true
+}

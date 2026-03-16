@@ -1,67 +1,137 @@
-# Intelligence Layer - 研究情报分析
+# Intelligence Layer - 研究情报分析 (v2: 双轨架构)
+
+> **v2 变更说明 (2026-03-16)**：从单一 LLM 分析链重构为双轨处理 + 空白检测架构。
+> 核心转变：从「用已知兴趣过滤论文」到「发现学术覆盖与工业需求之间的空白」。
+> 已完成的 P3a（L2 深度分析）和 P3b（主题聚类）保留不改，作为学术轨的核心组件。
 
 ## 1. 设计背景
 
-Research Radar Phase 1-2 建立了完整的数据基座：爬取→归一化→L1 增强→相关度评分→排序→报告。但这只覆盖了「感知前沿」，对用户最终目标「研究方向收敛」的贡献有限。
+### 1.1 Phase 1-2 回顾
 
-用户目标的四个层次：
+Research Radar Phase 1-2 建立了完整的数据基座：爬取→归一化→L1 增强→相关度评分→排序→报告。
 
-| 层次 | 需要什么 | Phase 1-2 覆盖 |
-|------|----------|---------------|
-| 感知前沿 | 收集论文/博客/动态 | 已完成 |
-| 整理结构 | 按主题/方法论聚类，看到领域全貌 | 未覆盖 |
-| 分析逻辑 | 识别趋势、发现空白、理解演进关系 | 未覆盖 |
-| 输出方向 | 基于分析提炼候选研究方向 | 未覆盖 |
+### 1.2 v1 架构的问题
 
-本文档定义 Phase 3「智能分析层」的完整设计，在现有 pipeline 之上增加四条新 pipeline 和一种新报告类型。
+v1 智能分析层设计了一条线性 LLM 链：`deep-analyze → cluster → trend → synthesize`。review 后发现三个根本问题：
+
+1. **只能过滤已知兴趣，不能发现未知机会**。Profile 有 30 个具体关键词（xss, csrf, ssrf 等），系统只会返回这些关键词匹配的内容。但用户要找的「高门槛、竞争少但有意义」的方向，往往不在已知关键词覆盖范围内。
+
+2. **不同来源的结构性差异被拍平**。顶会论文（学术界在做什么）和博客（工业界在痛什么）用同一套 `final_score = recency×0.4 + authority×0.3 + relevance×0.3` 排序。它们的作用根本不同，不应混排。
+
+3. **纯 LLM 长链推理不可靠**。四步 LLM 链每步都只有 Haiku 可用，误差逐级累积。方向综合（最终输出）的质量高度依赖前面每一步的准确性。
+
+### 1.3 用户目标精炼
+
+用户（安全领域低年级博士）的研究方向选择偏好：
+- **高门槛**：技术难度大，需要深入的前置知识
+- **长周期**：适合博士阶段的深耕，非短期热点
+- **低竞争**：做的人少，能避免与大组正面竞争
+- **有意义**：有实际影响力，能发表高质量论文
+
+这种方向往往出现在**工业界已在痛但学术界尚未充分解决**的空白地带。
+
+### 1.4 信息源的层次结构
+
+| 层级 | 来源 | 特征 | 信号类型 |
+|------|------|------|---------|
+| T1 最权威最慢 | 四大顶会 | 经同行评审，1-2 年时滞 | 学术界已确立的研究方向 |
+| T2 较权威较新 | arXiv | 未经评审，最新研究 | 趋势萌芽，新兴方向 |
+| T3 权威+新潮 | Project Zero / PortSwigger / Cloudflare | 机构背书，实际攻击面 | 工业需求信号 |
+| T4 快但不权威 | 个人博客 / 公众号 | 实时热点，质量参差 | 快速热点信号 |
+
+**关键洞察**：不同层级的信息应分轨处理、各自产出，最后交叉比对——而非拍平排序。
 
 ---
 
-## 2. 总体架构
+## 2. 总体架构（v2）
 
-### 2.1 Pipeline 拓展
-
-现有 pipeline 保持不变，在 `score` 之后追加智能分析链：
+### 2.1 双轨 + 空白检测
 
 ```
-[现有 — 保持不变]
-crawl → normalize → enrich(L1) → llm-relevance → score
-                                                    |
-[新增 — 智能分析层]                                   v
-                                        deep-analyze (L2, 逐条)
-                                                    |
-                                                    v
-                                            cluster (批量)
-                                                    |
-                                                    v
-                                        trend-analyze (逐 Theme)
-                                                    |
-                                                    v
-                                      synthesize-directions (单次)
-                                                    |
-                                                    v
-                                         landscape-report
+                      INGEST (不变)
+                 crawl → normalize → enrich(L1)
+                           |
+             +-------------+-------------+
+             |                           |
+        ACADEMIC TRACK              INDUSTRY TRACK
+        (T1 顶会 + T2 arXiv)       (T3 研究博客 + T4 未来快速源)
+             |                           |
+        broad domain filter         broad domain filter
+             |                           |
+        L2 deep-analyze (已有)      signal-extract (新)
+             |                           |
+        cluster (已有)              demand signal 聚合
+             |                           |
+        stat trend                       |
+             |                           |
+             +-------------+-------------+
+                           |
+                     GAP DETECTOR (新)
+                学术覆盖 vs 工业需求 的交叉比对
+                           |
+                     DIRECTION SYNTHESIS (改造)
+                基于空白 + Profile偏好 推导方向
+                           |
+                     LANDSCAPE REPORT
 ```
 
 ### 2.2 数据流概览
 
 ```
-~200 篇高相关论文  →  L2 深度分析（问题/方法/局限/开放问题）
-                         ↓
-                    ~10-15 个 Theme（研究子领域聚类）
-                         ↓
-                    每个 Theme 的趋势/方法演进/空白
-                         ↓
-                    2-3 个候选研究方向（含支撑论文和评分）
-                         ↓
-                    Landscape 全景报告（替换原周报）
+T1+T2 学术论文 (~2000 篇域内)     T3+T4 行业博客 (~100 篇)
+        |                                 |
+   L2 深度分析                        需求信号提取
+   (问题/方法/局限/开放问题)          (问题/影响/方案缺口/紧迫性)
+        |                                 |
+   10-15 个 Theme                    需求信号聚合
+   (研究子领域)                       (工业界在痛什么)
+        |                                 |
+   每个 Theme 的趋势                      |
+        |                                 |
+        +---------- 空白检测 ------------+
+                      |
+            「工业界在痛，学术界没解决好」的空白
+                      |
+                 2-3 个候选方向
+             (含证据链 + 空白评分)
+                      |
+               Landscape 全景报告
 ```
+
+### 2.3 与 v1 的关键差异
+
+| 维度 | v1 | v2 |
+|------|-----|-----|
+| 信息处理 | 所有来源拍平排序 | 学术轨 / 工业轨分开处理 |
+| 过滤方式 | 30 个具体关键词精确匹配 | 宽泛领域过滤，允许发现未知 |
+| 方向发现 | 纯 LLM 链推理 | 统计空白检测 + LLM 验证 |
+| 核心信号 | 论文内容（开放问题） | 学术覆盖 × 工业需求的差距 |
+| arXiv | 未接入 | cs.CR + cs.SE + cs.PL |
+| 博客作用 | 和论文混排 | 独立的需求信号源 |
 
 ---
 
 ## 3. 数据模型
 
-### 3.1 Theme（研究子领域）
+### 3.1 Source Tier 正式化
+
+新增 `SourceTier` 和 `InformationTrack` 枚举（`src/models/enums.py`）：
+
+```python
+class SourceTier(str, Enum):
+    T1_CONFERENCE = "t1-conference"        # 四大顶会
+    T2_ARXIV = "t2-arxiv"                 # arXiv
+    T3_RESEARCH_BLOG = "t3-research-blog"  # Project Zero, PortSwigger, Cloudflare
+    T4_PERSONAL = "t4-personal"            # 未来: 个人博客、公众号
+
+class InformationTrack(str, Enum):
+    ACADEMIC = "academic"    # T1 + T2
+    INDUSTRY = "industry"    # T3 + T4
+```
+
+不需要 schema 迁移。现有 `Artifact.source_tier` 列是 `String(50)`，直接存新枚举值。已有数据需一次性迁移：`"top-tier" → "t1-conference"`，`"high-quality-blog" → "t3-research-blog"` 等。
+
+### 3.2 Theme（研究子领域）— 已实现，不变
 
 表名：`themes`，文件：`src/models/theme.py`
 
@@ -69,32 +139,23 @@ crawl → normalize → enrich(L1) → llm-relevance → score
 |------|------|------|
 | id | Integer, PK | 自增主键 |
 | theme_id | String(36), unique, indexed | UUID 业务主键 |
-| name | String(200) | 主题名称，如「Web Fuzzing Techniques」 |
-| description | Text | 2-3 句话描述这个子领域 |
+| name | String(200) | 主题名称 |
+| description | Text | 2-3 句话描述 |
 | keywords | JSON (list[str]) | 代表性关键词 |
 | artifact_ids | JSON (list[int]) | 关联论文的 artifact.id |
-| artifact_count | Integer | 论文数量（冗余，便于查询） |
-| paper_count_by_year | JSON (dict[str,int]) | 按年统计，如 `{"2022":5, "2023":12}` |
+| artifact_count | Integer | 论文数量 |
+| paper_count_by_year | JSON (dict[str,int]) | 按年统计 |
 | methodology_tags | JSON (list[str]) | 常见研究方法 |
-| open_questions | JSON (list[str]) | 从 L2 分析中提取的开放问题 |
+| open_questions | JSON (list[str]) | 开放问题 |
 | trend_direction | String(20) | `growing` / `stable` / `declining` |
 | status | Enum(ThemeStatus) | `candidate` / `core` / `archived` |
-| generation_version | String(50) | 如 `v1`，聚类版本，用于幂等 |
-| week_id | String(10) | 如 `2026-W11`，生成时的 ISO 周 |
-| created_at / updated_at | DateTime | 时间戳（继承 TimestampedModel） |
+| generation_version | String(50) | 聚类版本 |
+| week_id | String(10) | ISO 周 |
+| created_at / updated_at | DateTime | 时间戳 |
 
-**ThemeStatus 枚举**（加入 `src/models/enums.py`）：
+### 3.3 CandidateDirection（候选研究方向）— 改造
 
-```python
-class ThemeStatus(str, Enum):
-    CANDIDATE = "candidate"   # 系统生成，待确认
-    CORE = "core"             # 用户确认的核心主题
-    ARCHIVED = "archived"     # 已归档或被合并
-```
-
-### 3.2 CandidateDirection（候选研究方向）
-
-表名：`candidate_directions`，文件：`src/models/candidate_direction.py`
+在 v1 基础上新增 `gap_id` 和 `gap_score` 字段，关联空白检测输出：
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
@@ -102,533 +163,634 @@ class ThemeStatus(str, Enum):
 | direction_id | String(36), unique, indexed | UUID 业务主键 |
 | title | String(300) | 方向标题 |
 | description | Text | 3-5 句话描述 |
-| rationale | Text | 为什么这个方向有价值 |
-| why_now | Text | 为什么当前时机合适 |
-| related_theme_ids | JSON (list[str]) | 关联的 theme_id 列表 |
-| supporting_artifact_ids | JSON (list[int]) | 支撑论文的 artifact.id |
+| rationale | Text | 为什么有价值 |
+| why_now | Text | 为什么时机合适 |
+| **gap_id** | **String(36), nullable** | **关联的 ResearchGap ID（新增）** |
+| **gap_score** | **Float, nullable** | **空白评分（新增）** |
+| related_theme_ids | JSON (list[str]) | 关联的 theme_id |
+| supporting_artifact_ids | JSON (list[int]) | 支撑 artifact.id（论文 + 博客） |
 | key_papers | JSON (list[dict]) | `[{title, artifact_id, contribution}]` |
-| open_questions | JSON (list[str]) | 这个方向待解决的问题 |
-| novelty_score | Float, nullable | 新颖性（1-5 → 0.0-1.0） |
-| impact_score | Float, nullable | 影响力（1-5 → 0.0-1.0） |
-| feasibility_score | Float, nullable | 可行性（1-5 → 0.0-1.0） |
+| open_questions | JSON (list[str]) | 待解决问题 |
+| novelty_score | Float, nullable | 新颖性 |
+| impact_score | Float, nullable | 影响力 |
+| feasibility_score | Float, nullable | 可行性 |
+| **barrier_score** | **Float, nullable** | **门槛高度（新增，用户偏好高门槛）** |
 | composite_direction_score | Float, nullable | 加权综合分 |
 | status | Enum(DirectionStatus) | `active` / `under_review` / `archived` |
 | generation_version | String(50) | 版本号 |
-| week_id | String(10) | 生成时的 ISO 周 |
+| week_id | String(10) | ISO 周 |
 | created_at / updated_at | DateTime | 时间戳 |
 
-**DirectionStatus 枚举**（加入 `src/models/enums.py`）：
+### 3.4 ResearchGap（研究空白）— 新增
+
+表名：`research_gaps`，文件：`src/models/research_gap.py`
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | Integer, PK | 自增主键 |
+| gap_id | String(36), unique, indexed | UUID 业务主键 |
+| topic | String(300) | 空白主题描述 |
+| demand_signals | JSON (list[dict]) | `[{artifact_id, problem_described, source_name}]` |
+| demand_frequency | Integer | 有多少个独立来源提到 |
+| academic_coverage | Float | 0.0-1.0，学术界覆盖程度 |
+| gap_score | Float | `demand_frequency × (1 - academic_coverage)` |
+| related_theme_ids | JSON (list[str]) | 最相近的学术 Theme |
+| related_artifact_ids | JSON (list[int]) | 相关的论文 + 博客 artifact |
+| status | String(20) | `active` / `validated` / `dismissed` |
+| generation_version | String(50) | 版本号 |
+| week_id | String(10) | ISO 周 |
+| created_at / updated_at | DateTime | 时间戳 |
+
+### 3.5 Profile V2（用户画像改造）
+
+Profile 模型新增两个 JSON 字段（nullable，无 schema 迁移）：
 
 ```python
-class DirectionStatus(str, Enum):
-    ACTIVE = "active"           # 当前推荐的方向
-    UNDER_REVIEW = "under_review"  # 用户正在评估
-    ARCHIVED = "archived"       # 不再推荐
+# src/models/profile.py 新增字段
+domain_scope: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+direction_preferences: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 ```
 
-### 3.3 现有模型变更
+新版 seed profile (`data/seed_profile_v2.json`)：
 
-**不需要 schema 变更**。`Artifact.summary_l2`（Text, nullable）已存在，直接用于存储 L2 深度分析的 JSON 字符串。
+```json
+{
+  "profile_version": "v2-broad",
+  "current_research_area": "Software Security & Systems Security",
+  "interests": [
+    "Vulnerability detection", "Program analysis", "Fuzzing",
+    "Supply chain security", "Web application security"
+  ],
+  "domain_scope": ["security", "software-engineering", "programming-languages"],
+  "preferred_topics": [],
+  "avoided_topics": [
+    "cryptography-theory", "blockchain", "formal-verification",
+    "privacy-policy", "usable-security-survey", "network-protocol-theory",
+    "quantum-computing"
+  ],
+  "direction_preferences": {
+    "barrier_level": "high",
+    "technical_depth": "deep",
+    "competition_tolerance": "low",
+    "cycle_preference": "long",
+    "impact_type": "practical"
+  },
+  "primary_goals": [
+    "找到高门槛、技术深度大、竞争少但有实际影响力的研究方向",
+    "偏好长周期有意义的工作，回避拥挤方向"
+  ],
+  "evaluation_criteria": {
+    "must_have": "明确的技术贡献或新攻击面",
+    "nice_to_have": "有原型实现或实际影响证据",
+    "dealbreaker": "纯理论无应用场景"
+  },
+  "is_active": true
+}
+```
 
-### 3.4 新增 Repository
+**关键变化**：`preferred_topics` 清空。不再用具体关键词约束发现范围。
 
-| Repository | 文件 | 关键方法 |
-|------------|------|----------|
-| `ThemeRepository` | `src/repositories/theme_repository.py` | `get_by_theme_id()`, `list_by_status()`, `list_by_week()`, `list_active_or_core()` |
-| `CandidateDirectionRepository` | `src/repositories/candidate_direction_repository.py` | `get_by_direction_id()`, `list_by_week()`, `list_by_status()` |
+### 3.6 现有模型变更
 
-遵循现有 `BaseRepository[T]` 泛型模式。
+`Artifact.summary_l2`（Text, nullable）双用途：
+- 论文类 artifact：存 L2 深度分析 JSON（已有格式不变）
+- 博客类 artifact：存需求信号 JSON（新格式，通过 `source_type` 区分）
+
+### 3.7 Repository
+
+| Repository | 文件 | 说明 |
+|------------|------|------|
+| `ThemeRepository` | `src/repositories/theme_repository.py` | 已实现 |
+| `ResearchGapRepository` | `src/repositories/research_gap_repository.py` | 新建 |
+| `CandidateDirectionRepository` | `src/repositories/candidate_direction_repository.py` | 新建 |
 
 ---
 
 ## 4. Pipeline 详细设计
 
-### 4.1 DeepAnalysisPipeline（L2 深度分析）
+### 4.1 DeepAnalysisPipeline（L2 深度分析）— 已实现，不变
 
 **文件**：`src/pipelines/deep_analysis.py`
 
-**目的**：对高相关论文生成结构化深度分析，填充 `Artifact.summary_l2`。
+**作用域**：学术轨（T1 + T2 论文）。
+
+筛选条件、输出格式、LLM 配置均不变。详见 v1 设计。
+
+**v2 变更**：`min_relevance` 门槛从 0.6 降到 0.4（配合 Profile 放宽后更多论文进入分析）。
+
+### 4.2 ClusteringPipeline（主题聚类）— 已实现，不变
+
+**文件**：`src/pipelines/clustering.py`
+
+**作用域**：学术轨（仅论文）。代码中已有 `source_type == SourceType.PAPERS` 过滤，博客不会进入聚类。
+
+### 4.3 SignalExtractionPipeline（需求信号提取）— 新增
+
+**文件**：`src/pipelines/signal_extraction.py`
+
+**作用域**：工业轨（T3 + T4 博客）。
+
+**目的**：从博客文章中提取结构化需求信号——工业界遇到了什么问题、现有方案有什么缺口。
 
 **筛选条件**：
-- `relevance_score >= 0.6`
-- `summary_l2 IS NULL`（未分析过）
-- `source_type == PAPERS`
+- `source_type == SourceType.BLOGS`
+- `relevance_score >= 0.3`（博客门槛比论文更低，因为即使边缘相关也可能揭示需求信号）
+- `summary_l2 IS NULL`
 
 **输出格式**（JSON 字符串存入 `summary_l2`）：
 
 ```json
 {
-  "research_problem": "这篇论文要解决什么问题",
-  "motivation": "为什么这个问题重要/现有方案的不足",
-  "methodology": "核心方法/技术路线",
-  "core_contributions": ["贡献1", "贡献2"],
-  "limitations": ["局限1", "局限2"],
-  "open_questions": ["可进一步研究的问题1", "问题2"],
-  "related_concepts": ["相关概念/技术1", "技术2"]
+  "signal_type": "demand",
+  "problem_described": "文章描述的核心安全问题",
+  "affected_systems": ["受影响的系统/技术"],
+  "current_solutions": "现有解决方案（如果提到）",
+  "solution_gaps": ["现有方案的不足之处"],
+  "urgency_indicators": ["为什么现在重要"],
+  "related_academic_topics": ["相关学术研究主题"]
 }
 ```
 
-**配置**：
-- LLM Tier: STANDARD
-- max_tokens: 1500
-- temperature: 0.3
-- cache_key: `deep_analysis_{analysis_version}_{canonical_id}`
-- max_workers: 4（STANDARD 调用较慢，控制并发）
-- prompt 模板：`prompts/deep_analysis.md`（中文）
-
-**幂等性**：
-- 已有 `summary_l2` 的 artifact 自动跳过
-- `analysis_version` 版本变更时，支持 `--force` 清空并重新分析
-
-**架构模式**：完全复用 `EnrichmentPipeline` 的设计模式（ThreadPoolExecutor + thread-local LLMClient + ProfileContext snapshot + JSON 解析容错）。
-
-### 4.2 ClusteringPipeline（主题聚类）
-
-**文件**：`src/pipelines/clustering.py`
-
-**目的**：将高相关论文按研究子领域聚类，生成 Theme 记录。
-
-**设计决策：LLM 聚类 vs Embedding 聚类**
-
-选择 LLM-based 聚类，原因：
-1. 语料规模小（~200 篇），LLM 上下文足够
-2. LLM 能理解「研究问题相似性」，而非表面词汇相似性
-3. 避免引入 sentence-transformers 等新依赖
-4. 与现有 LLM 基础设施（provider + cache + retry）一致
-
-**算法**：
-
-1. **收集**：筛选 `relevance_score >= 0.6 AND summary_l2 IS NOT NULL` 的论文
-2. **压缩表示**：每篇论文提取 `{id, title, research_problem, methodology, core_contributions}`（从 L2 JSON）
-3. **分批聚类**：每批 30-40 篇，发送到 LLM，要求返回聚类标签和论文分配
-4. **合并去重**：一次 merge 调用，将各批次的聚类标签合并（语义相似的合为一个）
-5. **持久化**：写入 Theme 记录
+`signal_type: "demand"` 字段用于区分博客信号 JSON 和论文 L2 分析 JSON。
 
 **LLM 配置**：
-- 分批调用：STANDARD tier
-- Merge 调用：PREMIUM tier（需要全局视角）
-- prompt 模板：`prompts/cluster_papers.md`（中文）
-- cache_key: `cluster_{cluster_version}_{sha256(sorted_canonical_ids)}`
+- Tier: STANDARD
+- max_tokens: 1000
+- temperature: 0.3
+- max_workers: 4
+- prompt 模板：`prompts/extract_demand_signal.md`（中文）
+- cache_key: `signal_{signal_version}_{canonical_id}`
 
-**增量策略**：
-- 首次运行：全量聚类
-- 后续运行：
-  - 新论文先尝试分类到已有 Theme（单独 LLM 调用）
-  - 累积 >10 篇无法分类的论文时，触发全量重聚类
-  - `status == CORE` 的 Theme 在重聚类时作为锚点保留
+**架构模式**：复用 `DeepAnalysisPipeline` 的 ThreadPoolExecutor + LLMClient 模式。
 
-### 4.3 TrendAnalysisPipeline（趋势分析）
+### 4.4 TrendAnalysisPipeline（趋势分析）— 设计改造
 
 **文件**：`src/pipelines/trend_analysis.py`
 
-**目的**：为每个 Theme 计算趋势指标，包括定量统计和定性分析。
+**作用域**：学术轨 Theme。
+
+**v2 变更**：增加 arXiv 论文的新关键词涌现检测。
 
 **处理逻辑**：
 
 1. **定量分析**（纯计算，无 LLM）：
    - 按年统计论文数 → `paper_count_by_year`
-   - 判断 `trend_direction`：近 2 年论文数 > 前 2 年 → `growing`，反之 → `declining`，持平 → `stable`
+   - `trend_direction`：近 2 年 vs 前 2 年论文数对比
+   - **新增**：arXiv 近 6 个月新出现的关键词/概念检测（从 L2 的 `related_concepts` 中提取，与 12 个月前对比）
 
-2. **定性分析**（LLM）：
-   - 输入：该 Theme 下所有论文的 L2 分析（research_problem + methodology + limitations）
-   - 输出：方法论演进总结、高频 limitation/open_question 归纳
-   - 更新 Theme 的 `methodology_tags` 和 `open_questions`
+2. **定性分析**（LLM，可选）：
+   - 每个 Theme 的方法论演进总结
+   - 高频 limitation/open_question 归纳
+
+### 4.5 GapDetectionPipeline（空白检测）— 新增，核心
+
+**文件**：`src/pipelines/gap_detection.py`
+
+**目的**：交叉比对学术覆盖和工业需求，找出空白。
+
+**算法**（主要是统计，少量 LLM）：
+
+**Step 1: 构建学术覆盖图**
+- 输入：所有 Theme（含 keywords, methodology_tags, open_questions）+ 所有论文 L2 的 `related_concepts`
+- 产出：一个 topic → coverage_count 映射，表示「学术界已覆盖的主题」
+
+**Step 2: 构建工业需求图**
+- 输入：所有博客 demand signal 的 `related_academic_topics` + `solution_gaps`
+- 产出：一个 topic → demand_frequency 映射，表示「工业界需要解决的问题」
+- 按 frequency 排序：多个独立来源提到的问题更可信
+
+**Step 3: 计算覆盖空白**
+- 对每个工业需求 topic，查找学术覆盖图中的匹配度
+- `gap_score = demand_frequency × (1 - academic_coverage_ratio)`
+- 高 gap_score = 工业需求强但学术覆盖弱
+
+**Step 4: LLM 验证（可选，单次调用）**
+- 取 top-N 空白候选
+- 一次 LLM 调用：「这些是真实的研究空白吗？哪些适合博士级研究？」
+- 这是一次验证，不是多步推理
+
+**输出**：`ResearchGap` 记录列表，持久化到 `research_gaps` 表。
 
 **LLM 配置**：
-- Tier: STANDARD
-- prompt 模板：`prompts/analyze_theme_trend.md`（中文）
-- cache_key: `trend_{trend_version}_{theme_id}_{sha256(artifact_l2s)}`
+- 验证调用 Tier: PREMIUM（核心输出质量优先）
+- max_tokens: 3000
+- temperature: 0.3
+- prompt 模板：`prompts/detect_gaps.md`（中文）
+- cache_key: `gap_{gap_version}_{week_id}_{sha256(demand_topics + academic_coverage)}`
 
-### 4.4 DirectionSynthesisPipeline（方向综合）
+**关键优势**：Steps 1-3 是纯统计，即使 Haiku 的 L2 分析和信号提取有误差，统计聚合会平滑个体错误。LLM 只在最后做验证，不做多步推理。
+
+### 4.6 DirectionSynthesisPipeline（方向综合）— 改造
 
 **文件**：`src/pipelines/direction_synthesis.py`
 
-**目的**：综合 Theme 全景、趋势分析和用户画像，输出 2-3 个候选研究方向。
+**v2 变更**：输入从 Themes 改为 ResearchGaps + Themes + Profile.direction_preferences。
 
 **输入**：
-- 所有 `status IN (candidate, core)` 的 Theme（含 trend_direction, open_questions）
-- 最新 active Profile（含 current_research_area, interests, past_projects, primary_goals, evaluation_criteria）
-- 用户在 Theme 和 Direction 上的历史反馈（`FeedbackTargetType.THEME/DIRECTION`）
+- Top-N ResearchGap（含 gap_score, demand_signals, academic_coverage）
+- 相关 Theme（含 trend_direction, open_questions）
+- Profile.direction_preferences（barrier_level, competition_tolerance 等）
+- 历史反馈
 
 **输出**：
 - 2-3 个 `CandidateDirection` 记录，每个包含：
   - title, description, rationale, why_now
-  - 三维评分（novelty, impact, feasibility）
-  - 支撑论文列表（key_papers）
-  - 关联 Theme（related_theme_ids）
-  - 待解决问题（open_questions）
+  - **gap_id** + **gap_score**（来自空白检测的证据）
+  - 四维评分（novelty, impact, feasibility, **barrier**）
+  - 支撑 artifact（论文 + 博客）
+  - key_papers
+  - open_questions
+
+**prompt 应特别关注**：
+1. 哪些空白代表高门槛研究机会？
+2. 哪些有长期意义 vs 短期热点？
+3. 博士生是否可行（时间、资源约束）？
 
 **LLM 配置**：
-- Tier: **PREMIUM**（这是系统的核心输出，质量优先）
+- Tier: PREMIUM
 - max_tokens: 4000
-- temperature: 0.5（允许一定创造性）
-- prompt 模板：`prompts/build_candidate_direction.md`（利用现有空文件）
-- cache_key: `direction_{direction_version}_{week_id}_{sha256(themes+profile)}`
-
-**幂等性**：按 `week_id + generation_version` 判断是否已生成。
+- temperature: 0.5
+- prompt 模板：`prompts/synthesize_from_gaps.md`（中文，新建）
+- 单次调用，有结构化统计数据作为输入
 
 ---
 
-## 5. Landscape 全景报告
+## 5. 评分改造
 
-### 5.1 定位
+### 5.1 分轨评分
 
-**替换现有周报**。用户每周 1-2 小时时间，Landscape 报告同时覆盖「论文推荐」和「方向分析」功能。
+v1 用同一公式 `final_score = recency×0.4 + authority×0.3 + relevance×0.3` 打所有来源。v2 分轨：
 
-日报保持不变（博客推荐）。
+**学术轨**（T1 + T2 论文）：
+```
+academic_score = domain_relevance × 0.5 + recency × 0.3 + authority × 0.2
+```
+- `domain_relevance`：宽泛领域相关度（替代原来的窄 `relevance_score`）
+- authority 权重降低（T1 论文全是 1.0，区分度低）
+- 此分用于决定哪些论文进入 L2 分析，不用于论文 vs 博客排序
 
-### 5.2 文件
+**工业轨**（T3 + T4 博客）：
+```
+industry_score = recency × 0.5 + domain_relevance × 0.4 + authority × 0.1
+```
+- recency 权重最高（博客时效性是核心价值）
+- authority 极低（T3 博客都是经筛选的，区分度小）
 
-- 生成器：`src/reporting/landscape.py`（继承 `BaseReportGenerator`）
-- 输出路径：`data/reports/weekly/YYYY-WXX.md`（复用周报目录）
+### 5.2 相关度评分 v4
 
-### 5.3 报告结构
+`RelevanceStrategy` 改造：
+
+- `preferred_topics` 为空时，跳过 keyword match 组件
+- `relevance_score` 完全由 LLM domain filter 决定
+- LLM prompt 从「这跟 web-security 相关吗？」变为「这是安全/软件工程领域的吗？」
+
+新 prompt（`prompts/relevance_score_v4.md`）：
+
+```
+你正在为一位安全与软件工程领域博士研究生评估内容的领域相关度。
+
+注意：这是宽泛的领域过滤，不是窄主题匹配。目标是保留该领域内所有可能有价值的内容。
+
+用户领域范围：{{domain_scope}}
+回避主题：{{avoided_topics}}
+
+评分标准（1-5）：
+5 = 安全或软件工程核心问题（漏洞、攻击、防御、程序分析、软件测试等）
+4 = 安全或软件工程的重要子领域（移动安全、内核安全、编译器安全等）
+3 = 与安全/SE 有明确交叉的其他领域（AI 安全应用、网络测量等）
+2 = 边缘相关（纯系统性能优化、纯机器学习等）
+1 = 不相关或属于回避列表
+
+内容信息：
+标题：{{title}}
+来源：{{source_name}} ({{source_tier}})
+摘要：{{summary_l1}}
+标签：{{tags}}
+
+请只返回一个 JSON：
+{"score": 数字, "reason": "一句话理由"}
+```
+
+**影响**：全量 re-score（v4 cache key），约 3900+55 条，Haiku 成本 ~$0.50。
+
+---
+
+## 6. Landscape 全景报告（v2）
+
+### 6.1 新增「空白分析」section
+
+在「趋势洞察」和「候选研究方向」之间新增：
 
 ```markdown
-# Research Radar - 研究前沿全景报告
-**周**: YYYY-WXX
-**周期**: YYYY-MM-DD 至 YYYY-MM-DD
-**生成时间**: YYYY-MM-DD HH:MM
-
 ---
 
-## 研究前沿地图
+## 学术-工业空白分析
 
-当前追踪 N 个研究子领域，涵盖 M 篇高相关论文。
+以下是工业界已在关注但学术界尚未充分解决的领域：
 
-### 1. [Theme Name] ▲ 上升趋势
-- **论文数**: 2022: X | 2023: Y | 2024: Z | 2025: W
-- **代表方法**: method1, method2, method3
-- **关键开放问题**:
-  - 问题1...
-  - 问题2...
-- **代表论文**: [Paper A] (USENIX 2025), [Paper B] (CCS 2024)
+### 空白 1: [Topic]  (gap_score: X.XX)
+- **工业需求**: N 个独立来源提到
+  - [Blog A] (PortSwigger) — 描述了什么问题...
+  - [Blog B] (Project Zero) — 发现了什么...
+- **学术覆盖**: 当前覆盖度 XX%
+  - 最近相关的 Theme: [Theme Name]
+  - 但缺少: ...
+- **空白性质**: 为什么这是一个研究机会
 
-### 2. [Theme Name] — 稳定
+### 空白 2: [Topic]  (gap_score: X.XX)
 ...
 
 ---
+```
 
-## 趋势洞察
+### 6.2 报告完整结构
 
-### 上升领域
-- [Theme]: 近两年论文数增长 X%，关键驱动...
-
-### 方法论演进
-- 从 X 方法向 Y 方法转变的趋势...
-
-### 研究空白
-- **空白 1**: 多篇论文提到但未解决...
-- **空白 2**: ...
-
----
-
-## 候选研究方向
-
-### 方向 1: [Direction Title]
-- **概述**: ...
-- **为什么现在**: ...
-- **新颖性**: ★★★★☆  |  **影响力**: ★★★★★  |  **可行性**: ★★★☆☆
-- **支撑论文**:
-  - [Paper A] (USENIX 2025) — 贡献...
-  - [Paper B] (CCS 2024) — 贡献...
-- **待解决问题**:
-  - 问题1...
-  - 问题2...
-- **建议下一步**: ...
-
-### 方向 2: [Direction Title]
-...
-
----
-
-## 推荐阅读
-
-支撑以上方向的论文，按优先级排序（排除已读）。
-
-| # | 标题 | 来源 | 关联方向 | 相关度 | 状态 |
-|---|------|------|----------|--------|------|
-| 1 | ... | USENIX 2025 | 方向1 | 0.95 | 未读 |
-| 2 | ... | CCS 2024 | 方向1,2 | 0.88 | 未读 |
-
----
-
-## 本周博客回顾
-
-| # | 标题 | 来源 | 相关度 | 状态 |
-|---|------|------|--------|------|
-| 1 | ... | PortSwigger | 0.85 | 未读 |
-
----
-
-## 统计
-- 高相关论文总数: X（已深度分析: Y）
-- 研究子领域数: Z
-- 累计候选方向数: W
-- 数据库总量: T
+```
+1. 研究前沿地图（Theme 概览，含趋势）
+2. 趋势洞察（上升领域、方法论演进）
+3. 学术-工业空白分析（新增，核心 section）
+4. 候选研究方向（基于空白，含证据链）
+5. 推荐阅读（支撑方向的论文 + 博客）
+6. 博客回顾
+7. 统计
 ```
 
 ---
 
-## 6. CLI 集成
+## 7. CLI 集成
 
-### 6.1 新增命令
+### 7.1 新增命令
 
 | 命令 | 说明 | 关键参数 |
 |------|------|----------|
-| `deep-analyze` | L2 深度分析 | `--provider`, `--artifact-id`, `--workers 4`, `--min-relevance 0.6` |
-| `cluster` | 主题聚类 | `--provider`, `--full/--incremental`, `--min-relevance 0.6` |
+| `deep-analyze` | L2 深度分析（已有） | `--provider`, `--artifact-id`, `--workers 4`, `--min-relevance 0.4` |
+| `cluster` | 主题聚类（已有） | `--provider`, `--full/--incremental`, `--min-relevance 0.4` |
+| `extract-signals` | 博客需求信号提取（新） | `--provider`, `--workers 4`, `--min-relevance 0.3` |
 | `trend` | 趋势分析 | `--provider`, `--theme-id` |
+| `detect-gaps` | 空白检测（新） | `--provider`, `--top-n 10` |
 | `synthesize` | 方向综合 | `--provider`, `--week-id` |
 
-### 6.2 报告命令扩展
+### 7.2 `run --full` 扩展
 
 ```bash
-research-radar report --type landscape [--date YYYY-MM-DD]
+# 完整智能分析链（每周运行）
+research-radar run --full --provider anthropic
 ```
 
-`landscape` 替换 `weekly`，代码中 `weekly` 保留但标注 deprecated。
-
-### 6.3 反馈命令扩展
-
-现有 `feedback` 命令增加互斥目标选项：
-
-```bash
-# 现有
-research-radar feedback --artifact-id 123 --type read
-
-# 新增
-research-radar feedback --theme-id UUID --type like
-research-radar feedback --direction-id UUID --type like --note "very promising"
+执行顺序：
 ```
-
-`--artifact-id`、`--theme-id`、`--direction-id` 三选一（互斥组）。
-
-### 6.4 `run` 命令扩展
-
-新增 `--full` 标志：
-
-```bash
-# 默认（日常运行，不变）
-research-radar run --provider openai --report-type daily
-
-# 完整智能分析链（通常每周运行一次）
-research-radar run --full --provider openai
+crawl → normalize → enrich → llm-relevance(v4) → score
+  → deep-analyze (学术轨)
+  → extract-signals (工业轨)
+  → cluster
+  → trend
+  → detect-gaps (交叉比对)
+  → synthesize
+  → landscape-report
 ```
-
-`--full` 在现有 pipeline 之后追加：
-`deep-analyze → cluster → trend → synthesize → landscape-report`
 
 ---
 
-## 7. Prompt 模板
+## 8. Prompt 模板
 
-### 7.1 新建模板
+### 8.1 新建模板
 
 | 文件 | 用途 | 语言 |
 |------|------|------|
-| `prompts/deep_analysis.md` | L2 深度分析 | 中文 |
-| `prompts/cluster_papers.md` | 批量聚类 | 中文 |
+| `prompts/relevance_score_v4.md` | 宽泛领域相关度评分 | 中文 |
+| `prompts/extract_demand_signal.md` | 博客需求信号提取 | 中文 |
+| `prompts/detect_gaps.md` | 空白验证 | 中文 |
+| `prompts/synthesize_from_gaps.md` | 基于空白的方向综合 | 中文 |
 | `prompts/analyze_theme_trend.md` | 趋势分析 | 中文 |
 
-### 7.2 填充现有空模板
+### 8.2 已有模板
 
-| 文件 | 用途 | 语言 |
-|------|------|------|
-| `prompts/build_candidate_direction.md` | 方向综合 | 中文 |
-| `prompts/extract_profile_signals.md` | 反馈信号提取 | 中文 |
+| 文件 | 状态 |
+|------|------|
+| `prompts/deep_analysis.md` | 已有，不变 |
+| `prompts/cluster_papers.md` | 已有，不变 |
+| `prompts/relevance_score.md` | 保留（v3），v4 新建单独文件 |
 
 ---
 
-## 8. 运行环境配置
+## 9. 运行环境配置
 
-### 8.1 LLM Tier 降级
+### 9.1 LLM Tier 降级
 
-当前用户通过第三方网关访问 Anthropic API，只有 `claude-haiku-4-5-20251001` 可用（无 Sonnet/Opus 权限）。所有 pipeline 的 tier 设计（FAST/STANDARD/PREMIUM）在代码中保留逻辑分层，但**运行时统一映射到 haiku**。
+不变。所有 tier 在运行时统一映射到 haiku。代码中的 tier 标注保留，后续升级只需改环境变量。
 
-`.env` 配置（已就绪）：
+### 9.2 成本估算（v2，基于 haiku）
+
+| 阶段 | Tier | 调用次数 | 估算成本 |
+|------|------|---------|---------|
+| 相关度 re-score (v4) | STANDARD | ~4000（一次性） | ~$0.50 |
+| L2 深度分析 | STANDARD | ~500-800（一次性，论文量增加） | ~$0.40 |
+| 需求信号提取 | STANDARD | ~55（现有博客）+ 增量 | ~$0.05 |
+| 聚类 | STANDARD + STANDARD | 10-20 批 + 1 merge | ~$0.10 |
+| 趋势分析 | STANDARD | 10-15 Theme | ~$0.05 |
+| 空白检测 | PREMIUM | 1 次 | ~$0.01 |
+| 方向综合 | PREMIUM | 1 次 | ~$0.01 |
+
+**首次运行总成本**：约 $1.10（主要是 re-score 和 L2 分析）
+**每周增量成本**：约 $0.15
+
+---
+
+## 10. 设计决策
+
+### D13-D18: 保留
+
+v1 的 D13（LLM 聚类）、D14（L2 存 summary_l2）、D15（Theme 快照）、D16（Landscape 替换周报）、D17（增量聚类）、D18（方向综合用 PREMIUM）保留。
+
+### D19: 双轨处理 > 拍平排序
+
+**决策**：学术来源和工业来源分轨处理，各自产出不同类型的中间结果，最后交叉比对。
+
+**理由**：
+- 论文告诉你「学术界在做什么」，博客告诉你「工业界在痛什么」
+- 拍平排序会丧失这种结构性差异
+- 空白检测需要两条轨道的独立产出才能交叉比对
+
+### D20: 统计空白检测 > 纯 LLM 推理链
+
+**决策**：方向发现的核心用统计方法（词频交叉比对），LLM 只做最后验证。
+
+**理由**：
+- Haiku 推理能力有限，四步 LLM 链误差会累积
+- 统计方法对个体 LLM 输出错误有天然容错（聚合平滑）
+- 用结构化统计数据喂给 LLM 做一次验证，比让 LLM 自己从头推理更可靠
+- 减少 LLM 调用次数，降低成本和延迟
+
+### D21: Profile 放宽为领域过滤
+
+**决策**：清空 `preferred_topics`，只保留 `domain_scope` + `avoided_topics` 做宽泛过滤。
+
+**理由**：
+- 30 个具体关键词限制了发现范围
+- 用户要找「不知道自己会感兴趣的」方向
+- 安全/SE 大领域内的内容全部保留，由下游分析决定价值
+- 已有 `avoided_topics` 足够排除明确不相关的内容
+
+**影响**：re-score 全量数据（v4），成本 ~$0.50。进入分析的论文数从 ~200 增到 ~500-800。
+
+### D22: 需求信号存 summary_l2
+
+**决策**：博客 demand signal JSON 存入 `Artifact.summary_l2`，与论文 L2 JSON 共用字段。
+
+**理由**：
+- 避免 schema 迁移
+- 通过 `signal_type` 字段和 `source_type` 区分两种 JSON 格式
+- 博客语料少（~55 条），无需独立表
+
+**权衡**：下游解析需检查 `source_type`，增加一点复杂度。
+
+### D23: 轨道分离是逻辑分离，非物理分离
+
+**决策**：两条轨道共用 `artifacts` 表，分离在 pipeline 路由和评分权重中实现。
+
+**理由**：
+- 简单，不增加表数量
+- 支持跨轨查询（如「找到与这个博客需求信号相关的论文」）
+- `source_tier` 字段足够做路由判断
+
+---
+
+## 11. 风险与缓解
+
+### R5-R8: 保留
+
+v1 的 R5（聚类质量）、R6（L2 首次成本）、R7（上下文窗口）、R8（Theme 稳定性）保留。
+
+### R9: 空白检测的词汇匹配精度
+
+**风险**：统计交叉比对基于 keyword/topic 字符串匹配，可能漏掉语义相同但措辞不同的匹配。
+
+**缓解**：
+- `related_academic_topics`（博客端）和 `keywords` + `related_concepts`（学术端）都由 LLM 生成，LLM 会倾向使用规范术语
+- 匹配时做 lowercase + stem 处理
+- 可选：用 LLM 做一次语义匹配增强（成本可控，一次调用）
+
+### R10: arXiv 数据量过大
+
+**风险**：cs.CR + cs.SE + cs.PL 合计约 5000-8000 篇/年。
+
+**缓解**：
+- 宽泛 domain filter 会过滤掉大部分（预计 ~60% 不在安全/SE 交叉领域）
+- L2 深度分析只处理 relevance >= 0.4 的论文
+- SQLite 处理万级记录无压力
+
+### R11: 需求信号质量依赖博客数量
+
+**风险**：当前只有 55 篇博客，需求信号可能不够多样化。
+
+**缓解**：
+- 先用现有 55 篇验证 pipeline，用户后续提供更多源
+- 需求信号是增量积累的，博客源越多信号越丰富
+- 空白检测算法本身很轻量，随时可重跑
+
+---
+
+## 12. 实施分期
+
+### Phase A: 基础改造
+
+| 工单 | 内容 | 依赖 | 新文件 | 修改文件 |
+|------|------|------|--------|---------|
+| **A1** | SourceTier 枚举 + 数据迁移 | 无 | — | `enums.py`, `normalization.py`, `authority.py`, `recency.py`, `cli/process.py` |
+| **A2** | Profile V2 + 宽泛相关度 | 无 | `seed_profile_v2.json`, `prompts/relevance_score_v4.md` | `profile.py`, `relevance.py`, `llm_relevance.py` |
+| **A3** | arXiv 爬虫 | A1 | `crawlers/arxiv_crawler.py` | `registry.py`, `cli/crawl.py` |
+
+A1 和 A2 可并行。
+
+### Phase B: 工业信号轨道
+
+| 工单 | 内容 | 依赖 | 新文件 | 修改文件 |
+|------|------|------|--------|---------|
+| **B1** | 需求信号提取 pipeline | A1 | `pipelines/signal_extraction.py`, `prompts/extract_demand_signal.md` | `cli/process.py`, `cli/main.py` |
+| **B2** | 分轨评分 | A1, A2 | `pipelines/track_router.py` | `composite.py` |
+
+### Phase C: 空白检测（核心产出）
+
+| 工单 | 内容 | 依赖 | 新文件 | 修改文件 |
+|------|------|------|--------|---------|
+| **C1** | ResearchGap 模型 + 空白检测 pipeline | B1, B2 | `models/research_gap.py`, `repositories/research_gap_repository.py`, `pipelines/gap_detection.py`, `prompts/detect_gaps.md` | `enums.py`, `models/__init__.py`, `cli/process.py` |
+| **C2** | CandidateDirection 模型 + 改造方向综合 | C1 | `models/candidate_direction.py`, `repositories/candidate_direction_repository.py`, `pipelines/direction_synthesis.py`, `prompts/synthesize_from_gaps.md` | `enums.py`, `models/__init__.py`, `cli/process.py` |
+| **C3** | Landscape 报告 | C2 | `reporting/landscape.py` | `cli/report.py`, `cli/process.py` |
+
+### Phase D: 趋势 + 反馈
+
+| 工单 | 内容 | 依赖 | 新文件 | 修改文件 |
+|------|------|------|--------|---------|
+| **D1** | 统计趋势分析 | Phase A | `pipelines/trend_analysis.py`, `prompts/analyze_theme_trend.md` | `cli/process.py` |
+| **D2** | 反馈闭环 | C3 | `pipelines/profile_signals.py` | `cli/feedback.py`, `prompts/extract_profile_signals.md` |
+
+### 依赖图
 
 ```
-ANTHROPIC_API_KEY=sk-...
-ANTHROPIC_BASE_URL=https://node-hk.sssaicode.com/api/v1/messages
-ANTHROPIC_MODEL_FAST=claude-haiku-4-5-20251001
-ANTHROPIC_MODEL_STANDARD=claude-haiku-4-5-20251001
-ANTHROPIC_MODEL_PREMIUM=claude-haiku-4-5-20251001
+A1 (tier) ──→ A3 (arXiv) ──→ B2 (分轨评分) ──→ C1 (空白检测)
+    |                                                  |
+    └──→ A2 (Profile V2) ──→ B1 (信号提取) ──→ C2 (方向综合)
+                                                       |
+                                                 C3 (Landscape)
+                                                       |
+                                              D1 (趋势) + D2 (反馈)
 ```
 
-所有新 pipeline 使用 `--provider anthropic`。历史的 Gemini 配置保留（llm-relevance v3 曾使用），但新 pipeline 不再使用。
-
-**影响**：
-- haiku 上下文窗口足够（200K tokens），但推理能力弱于 Sonnet/Opus
-- 方向综合（原设计 PREMIUM）的输出质量可能受限，需通过 prompt 工程弥补
-- 成本大幅降低（haiku 价格约为 Sonnet 的 1/10）
-- 代码中的 `ModelTier.STANDARD` / `ModelTier.PREMIUM` 标注保持不变，后续升级只需改环境变量
-
-### 8.2 成本估算（基于 haiku）
-
-| 阶段 | 设计 Tier | 实际模型 | 每次 token | 调用次数 | 估算成本 |
-|------|----------|---------|-----------|---------|---------|
-| L2 深度分析 | STANDARD | haiku | ~2000 in / ~800 out | ~200（首次） | ~$0.15 |
-| 聚类（分批） | STANDARD | haiku | ~4000 in / ~1000 out | 5-7 批 | ~$0.05 |
-| 聚类（merge） | PREMIUM | haiku | ~3000 in / ~1500 out | 1 次 | ~$0.01 |
-| 趋势分析 | STANDARD | haiku | ~3000 in / ~800 out | 10-15 Theme | ~$0.05 |
-| 方向综合 | PREMIUM | haiku | ~5000 in / ~2000 out | 1 次 | ~$0.01 |
-
-**首次运行总成本**：约 $0.3（haiku 定价极低）
-**每周运行成本**：约 $0.1
-
-全部结果通过 `FileLLMCache` 缓存，重跑不产生额外成本。
+**总计**：约 10 个 Codex 工单。
 
 ---
 
-## 9. 设计决策
-
-### D13: LLM 聚类 > Embedding 聚类
-
-**决策**：使用 LLM 直接聚类，不引入 embedding 基础设施。
-
-**理由**：
-- 语料小（~200 篇），不需要向量检索的效率优势
-- LLM 能理解「研究问题相似性」而非表面词汇相似性
-- 避免新增 sentence-transformers 依赖
-- 与现有 LLM 基础设施一致
-
-**权衡**：每次全量聚类成本更高（$2-3 vs embedding 方案的 $0.1），但运行频率低（每周或触发式）。
-
-### D14: L2 分析存 JSON 在 summary_l2 字段
-
-**决策**：L2 结构化分析存为 JSON 字符串在现有 `Artifact.summary_l2` Text 字段中。
-
-**理由**：
-- 不需要 schema 迁移，`summary_l2` 已存在
-- L2 数据作为整体产生和消费
-- 新增 7+ 个字段会臃肿 Artifact 模型
-- JSON 在下游解析足够简单
-
-### D15: Theme 为快照，非实时聚合
-
-**决策**：Theme 存储 `artifact_ids` 快照和 `week_id`，而非动态聚合查询。
-
-**理由**：
-- 遵循架构原则「prefer snapshots over in-place mutation」
-- 支持跨周对比（Theme 在不同周的论文数变化）
-- 用户确认的 `CORE` Theme 需要持久化，不被重聚类覆盖
-
-### D16: Landscape 报告替换周报
-
-**决策**：Landscape 全景报告替换现有 `WeeklyReportGenerator`，不并存。
-
-**理由**：
-- 用户每周只有 1-2 小时，同时看两份报告信息过载
-- Landscape 报告已包含论文推荐功能（推荐阅读 section）
-- 现有 `weekly` 类型代码保留但标记 deprecated，不删除
-
-### D17: 增量聚类策略
-
-**决策**：新论文先分类到已有 Theme，积累 >10 篇无法分类时触发全量重聚类。
-
-**理由**：
-- 避免每周全量重算的 LLM 成本
-- Theme 对用户保持稳定（不会频繁变动）
-- 新兴子领域（无法归入现有 Theme 的论文积累）会在重聚类时被识别
-
-### D18: 方向综合用 PREMIUM Tier
-
-**决策**：`DirectionSynthesisPipeline` 默认使用 PREMIUM tier LLM。
-
-**理由**：
-- 候选研究方向是整个系统的核心输出（「star output」）
-- 需要对多个 Theme 的趋势、空白进行综合推理
-- 每周仅 1 次调用，成本可控（$0.5-1/次）
-- 质量优先于成本
-
----
-
-## 10. 风险与缓解
-
-### R5: LLM 聚类质量不一致
-
-**风险**：不同批次的 LLM 调用可能产生语义重叠的聚类标签。
-
-**缓解**：
-- merge pass 专门处理合并重叠聚类
-- 用户可通过 `--theme-id ... --type like/dislike` 对 Theme 反馈，指导后续聚类
-- 全量重聚类定期校正
-
-### R6: L2 分析首次成本
-
-**风险**：~200 篇论文的首次 L2 分析估计 $4-6。
-
-**缓解**：
-- 一次性成本，后续增量处理仅 ~5-10 篇/周
-- 全部缓存，重跑零成本
-- 可通过 `--artifact-id` 逐条测试 prompt 质量后再全量运行
-
-### R7: 聚类上下文窗口限制
-
-**风险**：200 篇论文的摘要可能超出单次 LLM 上下文窗口。
-
-**缓解**：
-- 分批处理（30-40 篇/批），每批 ~4000 tokens
-- merge pass 只处理聚类标签（不含论文全文），token 消耗小
-- STANDARD tier 模型通常有 128K+ 上下文，单批 4K tokens 远低于限制
-
-### R8: Theme 稳定性
-
-**风险**：全量重聚类可能打乱用户已建立的心理模型。
-
-**缓解**：
-- `CORE` 状态的 Theme 在重聚类时保留
-- Landscape 报告标注 Theme 变更（新增/合并/拆分）
-- 重聚类仅影响 `CANDIDATE` 状态的 Theme
-
----
-
-## 11. 实施分期
-
-| 阶段 | 内容 | 依赖 | 新文件 | 修改文件 | Codex 工单 |
-|------|------|------|--------|---------|-----------|
-| **P3a** | L2 深度分析 pipeline + prompt + CLI | 无 | `pipelines/deep_analysis.py`, `prompts/deep_analysis.md` | `cli/process.py`, `cli/main.py` | 1 |
-| **P3b** | Theme 模型 + Repository + 聚类 pipeline + CLI | P3a | `models/theme.py`, `repositories/theme_repository.py`, `pipelines/clustering.py`, `prompts/cluster_papers.md` | `models/enums.py`, `models/__init__.py`, `cli/process.py`, `cli/main.py` | 1-2 |
-| **P3c** | 趋势分析 pipeline + CLI | P3b | `pipelines/trend_analysis.py`, `prompts/analyze_theme_trend.md` | `cli/process.py`, `cli/main.py` | 1 |
-| **P3d** | CandidateDirection 模型 + Repository + 方向综合 pipeline + CLI | P3c | `models/candidate_direction.py`, `repositories/candidate_direction_repository.py`, `pipelines/direction_synthesis.py` | `models/enums.py`, `models/__init__.py`, `prompts/build_candidate_direction.md`, `cli/process.py`, `cli/main.py` | 1-2 |
-| **P3e** | Landscape 报告 + 方向/主题反馈 + `run --full` | P3d | `reporting/landscape.py` | `cli/report.py`, `cli/feedback.py`, `cli/process.py`, `feedback/collector.py` | 1-2 |
-| **P3f** | Profile 信号提取（反馈闭环） | P3e | `pipelines/profile_signals.py` | `prompts/extract_profile_signals.md` | 1 |
-
-**总计**：6-9 个 Codex 工单，按依赖链串行实施。
-
----
-
-## 12. 文件清单总结
+## 13. 文件清单总结
 
 ### 新建文件
 
-| 文件 | 说明 |
-|------|------|
-| `src/models/theme.py` | Theme ORM 模型 |
-| `src/models/candidate_direction.py` | CandidateDirection ORM 模型 |
-| `src/repositories/theme_repository.py` | Theme Repository |
-| `src/repositories/candidate_direction_repository.py` | CandidateDirection Repository |
-| `src/pipelines/deep_analysis.py` | L2 深度分析 pipeline |
-| `src/pipelines/clustering.py` | 主题聚类 pipeline |
-| `src/pipelines/trend_analysis.py` | 趋势分析 pipeline |
-| `src/pipelines/direction_synthesis.py` | 方向综合 pipeline |
-| `src/pipelines/profile_signals.py` | 反馈信号提取 pipeline |
-| `src/reporting/landscape.py` | Landscape 报告生成器 |
-| `prompts/deep_analysis.md` | L2 深度分析 prompt |
-| `prompts/cluster_papers.md` | 聚类 prompt |
-| `prompts/analyze_theme_trend.md` | 趋势分析 prompt |
+| 文件 | 说明 | Phase |
+|------|------|-------|
+| `src/crawlers/arxiv_crawler.py` | arXiv 爬虫 | A3 |
+| `src/models/research_gap.py` | ResearchGap ORM 模型 | C1 |
+| `src/models/candidate_direction.py` | CandidateDirection ORM 模型 | C2 |
+| `src/repositories/research_gap_repository.py` | ResearchGap Repository | C1 |
+| `src/repositories/candidate_direction_repository.py` | CandidateDirection Repository | C2 |
+| `src/pipelines/signal_extraction.py` | 需求信号提取 | B1 |
+| `src/pipelines/track_router.py` | 轨道路由 | B2 |
+| `src/pipelines/gap_detection.py` | 空白检测 | C1 |
+| `src/pipelines/direction_synthesis.py` | 方向综合 | C2 |
+| `src/pipelines/trend_analysis.py` | 趋势分析 | D1 |
+| `src/pipelines/profile_signals.py` | 反馈信号提取 | D2 |
+| `src/reporting/landscape.py` | Landscape 报告 | C3 |
+| `data/seed_profile_v2.json` | 宽泛 Profile | A2 |
+| `prompts/relevance_score_v4.md` | 宽泛相关度 prompt | A2 |
+| `prompts/extract_demand_signal.md` | 需求信号提取 prompt | B1 |
+| `prompts/detect_gaps.md` | 空白验证 prompt | C1 |
+| `prompts/synthesize_from_gaps.md` | 方向综合 prompt | C2 |
+| `prompts/analyze_theme_trend.md` | 趋势分析 prompt | D1 |
 
 ### 修改文件
 
-| 文件 | 改动 |
+| 文件 | 改动 | Phase |
+|------|------|-------|
+| `src/models/enums.py` | 新增 SourceTier, InformationTrack, DirectionStatus | A1 |
+| `src/models/profile.py` | 新增 domain_scope, direction_preferences 字段 | A2 |
+| `src/models/__init__.py` | 导入新模型 | C1 |
+| `src/pipelines/normalization.py` | 更新 tier 映射 | A1 |
+| `src/scoring/relevance.py` | 处理空 preferred_topics | A2 |
+| `src/scoring/composite.py` | 分轨权重 | B2 |
+| `src/scoring/authority.py` | 用 SourceTier 枚举 | A1 |
+| `src/scoring/recency.py` | 用 SourceTier 枚举 | A1 |
+| `src/pipelines/llm_relevance.py` | bump v4 | A2 |
+| `src/crawlers/registry.py` | 注册 ArxivCrawler | A3 |
+| `src/cli/process.py` | 新增命令 + run --full | B1, C1 |
+| `src/cli/main.py` | 注册命令 | B1, C1 |
+| `src/cli/report.py` | landscape 类型 | C3 |
+| `src/cli/feedback.py` | theme/direction 反馈 | C3 |
+
+### 保留不变的文件
+
+| 文件 | 原因 |
 |------|------|
-| `src/models/enums.py` | 新增 `ThemeStatus`, `DirectionStatus` |
-| `src/models/__init__.py` | 导入新模型 |
-| `src/cli/main.py` | 注册新命令 |
-| `src/cli/process.py` | 新增 `deep-analyze`, `cluster`, `trend`, `synthesize` 命令 + `run --full` |
-| `src/cli/feedback.py` | 新增 `--theme-id`, `--direction-id` 互斥选项 |
-| `src/cli/report.py` | 新增 `landscape` 报告类型 |
-| `src/feedback/collector.py` | 新增 `collect_theme_feedback()`, `collect_direction_feedback()` |
-| `prompts/build_candidate_direction.md` | 填充（当前为空） |
-| `prompts/extract_profile_signals.md` | 填充（当前为空） |
+| `src/pipelines/deep_analysis.py` | 学术轨 L2 分析，完全复用 |
+| `src/pipelines/clustering.py` | 学术轨聚类，完全复用 |
+| `src/pipelines/enrichment.py` | L1 摘要，轨道无关 |
+| `src/models/artifact.py` | 无 schema 变更 |
+| `src/models/theme.py` | 已实现，不变 |
+| 现有 7 个爬虫 | 不变 |

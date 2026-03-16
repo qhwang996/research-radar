@@ -29,15 +29,16 @@ class RecencyStrategy(BaseScoringStrategy):
         source_name = (artifact.source_name or "").lower()
         source_tier = (artifact.source_tier or "").lower()
 
-        if artifact.source_type == SourceType.BLOGS or "blog" in source_tier:
+        if artifact.source_type == SourceType.BLOGS or source_tier in {"blog", "t3-research-blog", "t4-personal"}:
             score = self._score_by_days(age_days, [30, 90, 180, 365], [1.0, 0.95, 0.90, 0.80, 0.60])
         elif artifact.source_type == SourceType.ADVISORIES:
             score = self._score_by_days(age_days, [7, 28, 90, 180], [1.0, 0.95, 0.90, 0.80, 0.70])
-        elif "arxiv" in source_name:
+        elif source_tier == "t2-arxiv" or "arxiv" in source_name:
             score = self._score_by_days(age_days, [30, 90, 180], [1.0, 0.80, 0.60, 0.40])
         elif any(name in source_name for name in ["icse", "fse", "ase"]):
             score = self._score_by_days(age_days, [365, 730, 1095], [1.0, 0.90, 0.80, 0.60])
         else:
+            # T1 conferences and unrecognized sources
             score = self._score_by_days(age_days, [365, 730, 1095, 1825], [1.0, 0.95, 0.90, 0.80, 0.60])
 
         return self._clamp_score(score)

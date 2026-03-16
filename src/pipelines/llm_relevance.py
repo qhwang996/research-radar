@@ -76,6 +76,7 @@ class ProfileContext:
     interests: tuple[str, ...]
     preferred_topics: tuple[str, ...]
     avoided_topics: tuple[str, ...]
+    domain_scope: tuple[str, ...]
 
 
 class LLMRelevancePipeline(BasePipeline):
@@ -87,7 +88,7 @@ class LLMRelevancePipeline(BasePipeline):
         session_factory: sessionmaker[Session] | None = None,
         llm_client: LLMClient | Any | None = None,
         prompt_template_path: Path | None = None,
-        relevance_version: str = "v3",
+        relevance_version: str = "v4",
         max_workers: int = 8,
     ) -> None:
         """Initialize the pipeline dependencies."""
@@ -237,6 +238,7 @@ class LLMRelevancePipeline(BasePipeline):
             interests=tuple(profile.interests or []),
             preferred_topics=tuple(profile.preferred_topics or []),
             avoided_topics=tuple(profile.avoided_topics or []),
+            domain_scope=tuple(getattr(profile, "domain_scope", None) or []),
         )
 
     def validate_input(self, data: Any) -> bool:
@@ -311,11 +313,27 @@ class LLMRelevancePipeline(BasePipeline):
     def _build_prompt(self, template: str, artifact: Artifact, profile: Profile | ProfileContext | None) -> str:
         """Render prompt placeholders for one artifact/profile pair."""
 
+        # Use v4 broad template when preferred_topics is empty
+        effective_template = template
+        if profile is not None and not profile.preferred_topics:
+            v4_path = Path("prompts/relevance_score_v4.md")
+            if v4_path.exists():
+                v4_template = v4_path.read_text(encoding="utf-8").strip()
+                if v4_template:
+                    effective_template = v4_template
+
+        domain_scope_str = "None"
+        if profile is not None:
+            ds = getattr(profile, "domain_scope", None)
+            if ds:
+                domain_scope_str = ", ".join(ds)
+
         replacements = {
             "{{research_area}}": (profile.current_research_area or "Unknown") if profile is not None else "Unknown",
             "{{interests}}": ", ".join(profile.interests) if profile is not None and profile.interests else "None",
             "{{preferred_topics}}": ", ".join(profile.preferred_topics) if profile is not None and profile.preferred_topics else "None",
             "{{avoided_topics}}": ", ".join(profile.avoided_topics) if profile is not None and profile.avoided_topics else "None",
+            "{{domain_scope}}": domain_scope_str,
             "{{title}}": artifact.title,
             "{{source_name}}": artifact.source_name or "Unknown",
             "{{source_tier}}": artifact.source_tier or "Unknown",
@@ -323,7 +341,7 @@ class LLMRelevancePipeline(BasePipeline):
             "{{tags}}": ", ".join(artifact.tags) if artifact.tags else "None",
         }
 
-        prompt = template
+        prompt = effective_template
         for placeholder, value in replacements.items():
             prompt = prompt.replace(placeholder, value)
         return prompt

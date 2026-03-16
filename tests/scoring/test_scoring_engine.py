@@ -156,8 +156,8 @@ class ScoringStrategyTestCase(unittest.TestCase):
         self.assertEqual(breakdown["authority_score"], 1.0)
         self.assertEqual(breakdown["relevance_score"], 0.6)
         self.assertEqual(breakdown["final_score"], 0.86)
-        self.assertEqual(breakdown["formula"], "final_score = recency * 0.4 + authority * 0.3 + relevance * 0.3")
-        self.assertEqual(breakdown["version"], "phase2-v1")
+        self.assertIn("legacy", breakdown["formula"])
+        self.assertEqual(breakdown["version"], "phase3-v2")
 
 
 class ScoringEngineIntegrationTestCase(unittest.TestCase):

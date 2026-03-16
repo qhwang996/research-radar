@@ -4,12 +4,30 @@
 
 评分系统的目标是在LLM上下文窗口限制下，优先保留和推荐最有价值的内容。
 
-**核心评分公式：**
+> **v2 重构 (2026-03-16)**：从单一评分公式改为分轨评分。学术轨和工业轨使用不同权重配置，不再混排。
+
+### 1.1 分轨评分公式（v2）
+
+**学术轨**（T1 顶会 + T2 arXiv）：
 ```
-final_score = (recency_score × 0.4) + (authority_score × 0.3) + (relevance_score × 0.3)
+academic_score = domain_relevance × 0.5 + recency × 0.3 + authority × 0.2
+```
+用于决定哪些论文进入 L2 深度分析和聚类。
+
+**工业轨**（T3 博客 + T4 未来快速源）：
+```
+industry_score = recency × 0.5 + domain_relevance × 0.4 + authority × 0.1
+```
+用于决定哪些博客进入需求信号提取。
+
+### 1.2 历史公式（v1，deprecated）
+
+```
+final_score = recency × 0.4 + authority × 0.3 + relevance × 0.3
+relevance = keyword_match × 0.4 + llm_relevance × 0.6
 ```
 
-> **Phase 2 状态 (2026-03-11)**：relevance_score 当前只实现 keyword match 部分（P7.1），LLM relevance scoring 待 P7.2 实现后与 keyword match 按 0.4/0.6 加权合并。
+v1 公式保留在代码中作为 fallback，当 artifact 的 source_tier 无法识别轨道时使用。
 
 然后根据历史反馈调整：
 ```
@@ -98,53 +116,29 @@ adjusted_score = final_score × feedback_multiplier
 
 ## 4. Relevance Score (研究相关度评分)
 
-### 4.1 混合计算方式
+### 4.1 v4 宽泛领域过滤（当前）
+
+> **v2 变更 (2026-03-16)**：Profile 放宽后 `preferred_topics` 为空，keyword match 组件停用。relevance 完全由 LLM domain filter 决定。
+
+```
+relevance_score = llm_domain_relevance_score (v4)
+```
+
+LLM prompt 从「这跟 web-security 相关吗？」变为「这是安全/软件工程领域的吗？」——宽泛领域过滤，目标是保留所有可能有价值的内容，让下游分析（聚类、空白检测）决定价值。
+
+评分标准：
+- 5 = 安全或软件工程核心问题
+- 4 = 安全或软件工程的重要子领域
+- 3 = 与安全/SE 有明确交叉
+- 2 = 边缘相关
+- 1 = 不相关或属于回避列表
+
+### 4.2 v3 混合计算方式（deprecated，代码保留）
 ```
 relevance_score = (keyword_match_score × 0.4) + (llm_relevance_score × 0.6)
 ```
 
-### 4.2 Keyword Match Score
-用户提供核心关键词列表，例如：
-- Web安全
-- Web漏洞
-- 渗透测试
-- Java安全
-- 反序列化
-- XSS, CSRF, SQL注入
-- 供应链攻击
-- ...
-
-**计算方式**：
-- 标题/摘要中包含1个关键词: 0.6
-- 包含2个关键词: 0.8
-- 包含3个及以上: 1.0
-- 不包含任何关键词: 0.0 (但仍会进入LLM判断)
-
-### 4.3 LLM Relevance Score
-对于通过关键词初筛的内容，或关键词未匹配但可能相关的内容，使用LLM判断：
-
-**Prompt示例**：
-```
-基于用户的研究背景和价值观，评估以下内容的相关性（1-5分）：
-
-用户Profile：
-- 当前研究领域：Web应用安全
-- 价值观：对工业界有实际影响 + 必须有技术贡献
-- 关键词：[...]
-
-内容：
-标题：{title}
-摘要：{summary}
-
-请评分并简要说明理由。
-```
-
-**评分映射**：
-- LLM评分5: 1.0
-- LLM评分4: 0.8
-- LLM评分3: 0.6
-- LLM评分2: 0.4
-- LLM评分1: 0.2
+v3 版本在 Profile 有具体 `preferred_topics` 时使用。当 `preferred_topics` 为空时自动降级为纯 LLM domain filter。
 
 
 ---

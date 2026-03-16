@@ -6,16 +6,19 @@
 
 ### 1.1 权威性分层（Source Tier）
 
-| Tier | 类型 | 示例 | authority 基线 | 说明 |
-|------|------|------|---------------|------|
-| T1 | 顶会论文 | NDSS, S&P, CCS, USENIX Security | 1.0 | 经过同行评审，最高权威性 |
-| T2 | 知名安全研究博客 | PortSwigger Research, Google Project Zero, Cloudflare | 0.7 | 机构背书，内容质量稳定 |
-| T3 | 漏洞公告 | GitHub Advisory, NVD, AVD | 待设计 | 质量参差不齐，需要更精细的打分方案 |
-| T4 | 个人/公司博客 | 待筛选 | 待设计 | 质量参差不齐，需要更精细的打分方案 |
+> **v2 重构 (2026-03-16)**：Tier 体系调整为与双轨架构对齐。原 T2（博客）→ T3，新增 T2（arXiv）。
+> 详见 `09_intelligence_layer.md` 的 SourceTier 枚举。
 
-**当前实现**：T1 + T2（已有爬虫，T2 尚未 live 验证）
-**近期目标**：T2 live 验证 + GitHub Advisory 爬虫（T3 首个源）
-**T3/T4 打分方案**：待后续设计，需要比 T1/T2 更精细的 authority 评估维度
+| Tier | 枚举值 | 信息轨道 | 类型 | 示例 | authority | 说明 |
+|------|--------|---------|------|------|-----------|------|
+| T1 | `t1-conference` | 学术轨 | 顶会论文 | NDSS, S&P, CCS, USENIX Security | 1.0 | 经过同行评审，最高权威性 |
+| T2 | `t2-arxiv` | 学术轨 | arXiv 预印本 | cs.CR, cs.SE, cs.PL | 0.5 | 最新研究，未经评审，能看到趋势萌芽 |
+| T3 | `t3-research-blog` | 工业轨 | 知名安全研究博客 | Project Zero, PortSwigger, Cloudflare | 0.7 | 机构背书，代表工业需求信号 |
+| T4 | `t4-personal` | 工业轨 | 个人/公司博客 | 用户指定 | 待设计 | 快速热点，质量参差不齐 |
+
+**当前实现**：T1（已有爬虫）+ T3 博客（已有爬虫，已 live 验证，55 条入库）
+**Phase A 新增**：T2 arXiv 爬虫
+**未来**：T4 个人博客/公众号（用户后续提供具体源）
 
 ### 1.2 更新频率分层
 
@@ -71,27 +74,38 @@
 - ICSE, FSE, ASE 的 Security track
 - 评分已预留 source_tier 支持
 
-### 2.6 arXiv — 未实现
+### 2.6 arXiv (T2) — Phase A 新增
 
-- API: arXiv API，分类 cs.CR
-- 评分已预留衰减曲线
+**API**：arXiv Atom API (`https://export.arxiv.org/api/query`)
+**分类**：cs.CR (Cryptography and Security) + cs.SE (Software Engineering) + cs.PL (Programming Languages)
+**时间范围**：最近 12 个月（趋势检测需要足够的时间跨度）
+**预计数据量**：~5000-8000 篇/年（经域过滤后进入分析的约 1000-2000 篇）
+**Rate limit**：每请求间隔 3 秒（arXiv 政策要求）
+**增量爬取**：追踪上次爬取时间，每日增量获取
+**Tier 值**：`t2-arxiv`（学术轨，authority=0.5）
+**衰减曲线**：见 Section 2.5（近1月 1.0，6月+ 0.40）
+
+ArxivCrawler 设计要点：
+- 扩展 `PaperCrawler` 基类
+- 解析 Atom XML 响应
+- 提取：title, authors, abstract, published_date, arxiv_id, categories, pdf_url
+- arxiv_id 作为 external_id 用于去重
+- 分页处理（每页 100 条）
+- 注册到 `src/crawlers/registry.py`
 
 ---
 
-## 3. Blogs (T2)
+## 3. Blogs (T3)
 
-### 3.1 已实现爬虫（尚未 live 验证）
+### 3.1 已实现爬虫（已 live 验证，55 条入库）
 
 | 博客 | URL | 说明 | source_tier |
 |------|-----|------|-------------|
-| PortSwigger Research | https://portswigger.net/research | Web 安全研究，高度相关 | high-quality-blog |
-| Google Project Zero | https://googleprojectzero.blogspot.com/ | 漏洞研究，深度分析 | high-quality-blog |
-| Cloudflare Security Blog | https://blog.cloudflare.com/tag/security/ | 安全+基础设施 | high-quality-blog |
+| PortSwigger Research | https://portswigger.net/research | Web 安全研究 | t3-research-blog |
+| Google Project Zero | https://googleprojectzero.blogspot.com/ | 漏洞研究 | t3-research-blog |
+| Cloudflare Security Blog | https://blog.cloudflare.com/tag/security/ | 安全+基础设施 | t3-research-blog |
 
-**当前状态**：爬虫代码已写，registry 已注册，normalize 已支持 blogs 类型。但从未 live 执行过，需要验证：
-1. HTML 结构是否仍然匹配（网站可能已改版）
-2. 输出格式是否能正确 normalize
-3. authority=0.7 的博客在报告中的排序位置是否合理
+**v2 定位变更**：博客不再与论文混排。博客属于工业轨，其核心价值是**需求信号**（工业界遇到了什么问题），通过 `SignalExtractionPipeline` 提取结构化需求信号，用于与学术覆盖交叉比对（空白检测）。
 
 ### 3.2 潜在新增博客源
 
@@ -127,17 +141,18 @@
 
 ---
 
-## 5. 个人/公司博客 (T4) — 未实现
+## 5. 个人/公司博客 (T4) — 待用户提供
 
-质量参差不齐，需要更详细的打分方案才能接入。否则海量低质量数据会稀释报告价值。
+用户确认有具体想追踪的个人博客/公众号，将在后续提供 URL。
 
-可能的评估维度：
-- 作者学术背景（h-index、顶会发表记录）
-- 博客历史文章质量
-- 社区引用/转发量
-- 内容与用户兴趣的匹配度
+T4 源属于工业轨，接入后同样通过 `SignalExtractionPipeline` 提取需求信号。
 
-暂不纳入 Phase 2 计划。
+设计架构已预留 T4 支持（`SourceTier.T4_PERSONAL` 枚举），新增源只需：
+1. 实现爬虫（扩展 `BaseCrawler`）
+2. 注册到 `registry.py`
+3. normalization tier 映射中加入 `t4-personal`
+
+暂不纳入当前实施计划，等用户提供具体源。
 
 ---
 
@@ -166,26 +181,24 @@
 
 ---
 
-## 7. 近期实施计划
+## 7. 近期实施计划（v2 更新）
 
-### Phase 2a：博客源 live 验证（当前优先）
+### Phase A：基础改造（当前优先）
 
-1. 逐个 live 验证 3 个已有博客爬虫
-2. 修复 HTML selector 漂移问题（如有）
-3. 博客数据走完全流程：crawl → normalize → enrich → llm-relevance → score → report
-4. 验证博客在报告中的排序和呈现是否合理
+1. **A1**: SourceTier 枚举正式化 + 已有数据 tier 值迁移
+2. **A2**: Profile V2（放宽关键词）+ 宽泛相关度评分 v4
+3. **A3**: arXiv 爬虫（cs.CR + cs.SE + cs.PL）
 
-### Phase 2b：GitHub Advisory 爬虫
+### Phase B：工业信号轨道
 
-1. 实现 GitHub Advisory 爬虫（GraphQL API）
-2. 接入 normalize pipeline
-3. authority 打分暂用 CVSS 映射
+4. **B1**: 需求信号提取 pipeline（博客 → 结构化需求信号）
+5. **B2**: 分轨评分（学术轨 / 工业轨 不同权重）
 
-### Phase 2c：调度器
+### Phase C-D：空白检测 + 方向综合
 
-在 Phase 2a/2b 完成、日更数据源就绪后，实现调度器：
-- 基于 Python 标准库 while-loop + sleep
-- 博客/漏洞公告每天爬取
-- 论文状态检测每天轻量 check
-- graceful shutdown（SIGINT/SIGTERM）
-- 运行日志 RotatingFileHandler
+见 `09_intelligence_layer.md` Phase C-D。
+
+### 降低优先级
+
+- Phase 2b（GitHub Advisory 爬虫）— 降优，空白检测不依赖 advisory
+- Phase 2c（调度器）— 降优，先手动运行验证全流程

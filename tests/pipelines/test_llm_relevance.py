@@ -94,10 +94,10 @@ class LLMRelevancePipelineTestCase(unittest.TestCase):
 
         self.assertEqual(len(scored), 1)
         self.assertEqual(scored[0].score_breakdown["llm_relevance_score"], 0.8)
-        self.assertEqual(scored[0].score_breakdown["llm_relevance_version"], "v3")
+        self.assertEqual(scored[0].score_breakdown["llm_relevance_version"], "v4")
         self.assertEqual(len(llm_client.calls), 1)
         self.assertEqual(llm_client.calls[0]["model_tier"], ModelTier.STANDARD)
-        self.assertTrue(str(llm_client.calls[0]["cache_key"]).startswith("relevance_v3_"))
+        self.assertTrue(str(llm_client.calls[0]["cache_key"]).startswith("relevance_v4_"))
 
     def test_pipeline_skips_already_scored(self) -> None:
         """Artifacts with existing llm_relevance_score should not be sent again."""
@@ -111,7 +111,7 @@ class LLMRelevancePipelineTestCase(unittest.TestCase):
         (self.workspace / "prompt.md").write_text("{{title}}", encoding="utf-8")
         self._save_artifact(
             title="Already Scored",
-            score_breakdown={"llm_relevance_score": 0.8, "llm_relevance_version": "v3"},
+            score_breakdown={"llm_relevance_score": 0.8, "llm_relevance_version": "v4"},
         )
 
         scored = pipeline.process(None)
@@ -138,7 +138,7 @@ class LLMRelevancePipelineTestCase(unittest.TestCase):
 
         self.assertEqual(len(scored), 1)
         self.assertEqual(scored[0].score_breakdown["llm_relevance_score"], 1.0)
-        self.assertEqual(scored[0].score_breakdown["llm_relevance_version"], "v3")
+        self.assertEqual(scored[0].score_breakdown["llm_relevance_version"], "v4")
         self.assertEqual(len(llm_client.calls), 1)
 
     def test_pipeline_continues_on_single_failure(self) -> None:

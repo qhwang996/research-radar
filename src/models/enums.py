@@ -49,6 +49,39 @@ class ThemeStatus(str, Enum):
     ARCHIVED = "archived"
 
 
+class SourceTier(str, Enum):
+    """Formalized source authority tiers aligned with dual-track architecture."""
+
+    T1_CONFERENCE = "t1-conference"        # Top-4 security conferences
+    T2_ARXIV = "t2-arxiv"                 # arXiv preprints
+    T3_RESEARCH_BLOG = "t3-research-blog"  # Curated research blogs
+    T4_PERSONAL = "t4-personal"            # Personal blogs, WeChat (future)
+
+
+class InformationTrack(str, Enum):
+    """Processing track assignment based on source tier."""
+
+    ACADEMIC = "academic"    # T1 + T2
+    INDUSTRY = "industry"    # T3 + T4
+
+
+# Tier → Track mapping
+TIER_TO_TRACK = {
+    SourceTier.T1_CONFERENCE: InformationTrack.ACADEMIC,
+    SourceTier.T2_ARXIV: InformationTrack.ACADEMIC,
+    SourceTier.T3_RESEARCH_BLOG: InformationTrack.INDUSTRY,
+    SourceTier.T4_PERSONAL: InformationTrack.INDUSTRY,
+}
+
+
+class DirectionStatus(str, Enum):
+    """Lifecycle states for a candidate research direction."""
+
+    ACTIVE = "active"
+    UNDER_REVIEW = "under_review"
+    ARCHIVED = "archived"
+
+
 class RawFetchStatus(str, Enum):
     """Lifecycle states for raw fetch tracking records."""
 

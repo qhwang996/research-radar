@@ -83,5 +83,13 @@ class Profile(TimestampedModel, Base):
         nullable=False,
         default=dict,
     )
+    domain_scope: Mapped[list[str] | None] = mapped_column(
+        MutableList.as_mutable(JSON),
+        nullable=True,
+    )
+    direction_preferences: Mapped[dict[str, Any] | None] = mapped_column(
+        MutableDict.as_mutable(JSON),
+        nullable=True,
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
     last_manual_edit: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

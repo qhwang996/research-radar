@@ -17,6 +17,16 @@ class AuthorityStrategy(BaseScoringStrategy):
         source_name = (artifact.source_name or "").lower()
         source_tier = (artifact.source_tier or "").lower()
 
+        # New tier values (v2)
+        if source_tier == "t1-conference":
+            return 1.0
+        if source_tier == "t2-arxiv":
+            return 0.5
+        if source_tier == "t3-research-blog":
+            return 0.7
+        if source_tier == "t4-personal":
+            return 0.4
+        # Legacy tier values (fallback)
         if source_tier == "top-tier":
             return 1.0
         if any(name in source_name for name in ["icse", "fse", "ase"]):

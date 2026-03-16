@@ -59,7 +59,7 @@ class StubLLMClient:
                 ],
                 ensure_ascii=False,
             )
-        if cache_key.startswith("relevance_v3_"):
+        if cache_key.startswith("relevance_v3_") or cache_key.startswith("relevance_v4_"):
             return json.dumps({"score": 4, "reason": "Highly relevant to web security."})
         if cache_key.startswith("deep_analysis_v1_"):
             return json.dumps(

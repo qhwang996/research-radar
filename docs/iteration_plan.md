@@ -495,103 +495,93 @@
 
 ---
 
-## Phase 3 研究情报分析（当前优先）
+## Phase 3 智能分析层（v2 双轨架构）
 
-**设计目标**：在现有数据基座上增加智能分析层，实现从「信息过滤」到「研究方向收敛」的跨越。
+> **v2 架构转向 (2026-03-16)**：从单一 LLM 分析链重构为双轨处理 + 空白检测。
+> 核心变化：Profile 放宽、arXiv 接入、学术/工业分轨、统计空白检测。
+> 完整设计：`docs/design/09_intelligence_layer.md`
 
-**完整设计**：`docs/design/09_intelligence_layer.md`
+### P3a：L2 深度分析 ✅ 已完成
+- DeepAnalysisPipeline（学术轨，论文 L2 结构化分析）
+- 137 tests passed
 
-### P3a：L2 深度分析 ⬜
-**依赖**：无（利用现有 Artifact.summary_l2 字段）
-**核心功能**：
-- DeepAnalysisPipeline：对 ~200 篇高相关论文生成结构化深度分析
-- 输出 JSON：research_problem / methodology / core_contributions / limitations / open_questions
-- LLM STANDARD tier，逐条处理，ThreadPoolExecutor 并行
-- prompt 模板：`prompts/deep_analysis.md`
-- CLI 命令：`deep-analyze`
+### P3b：主题聚类 ✅ 已完成
+- Theme 模型 + ClusteringPipeline（学术轨，论文聚类）
+- 137 tests passed
 
-**验收标准**：
-- [ ] relevance >= 0.6 的论文有 summary_l2
-- [ ] summary_l2 JSON 结构完整可解析
-- [ ] 缓存有效，重跑跳过已分析的论文
+### Phase A：基础改造（当前优先）
 
-### P3b：主题聚类 ⬜
-**依赖**：P3a
-**核心功能**：
-- Theme 模型 + ThemeRepository
-- ClusteringPipeline：LLM 语义聚类（分批 30-40 篇 + merge pass）
-- 增量策略：新论文先分类到已有 Theme，>10 篇无法分类时触发全量重聚类
-- prompt 模板：`prompts/cluster_papers.md`
-- CLI 命令：`cluster`
+**A1: SourceTier 正式化 + 数据迁移** ⬜
+- 新增 SourceTier / InformationTrack 枚举
+- 已有数据 tier 值迁移（`"top-tier"` → `"t1-conference"` 等）
+- 修改 normalization / authority / recency 使用新枚举
 
-**验收标准**：
-- [ ] 生成 ~10-15 个语义合理的 Theme
-- [ ] 每个 Theme 有 name / description / artifact_ids / keywords
-- [ ] CORE 状态的 Theme 在重聚类时保留
+**A2: Profile V2 + 宽泛相关度** ⬜
+- seed_profile_v2.json（清空 preferred_topics，新增 domain_scope / direction_preferences）
+- relevance_score_v4.md（宽泛领域过滤 prompt）
+- RelevanceStrategy 处理空 preferred_topics
+- LLMRelevancePipeline bump v4
+- 全量 re-score ~4000 条（Haiku 成本 ~$0.50）
 
-### P3c：趋势分析 ⬜
-**依赖**：P3b
-**核心功能**：
-- TrendAnalysisPipeline：定量统计（论文数/年）+ 定性分析（方法演进、开放问题）
-- 更新 Theme 的 trend_direction / methodology_tags / open_questions
-- prompt 模板：`prompts/analyze_theme_trend.md`
-- CLI 命令：`trend`
+**A3: arXiv 爬虫** ⬜
+- ArxivCrawler（cs.CR + cs.SE + cs.PL，Atom XML API）
+- 12 个月增量爬取，每请求 3 秒间隔
+- 注册到 registry
 
-**验收标准**：
-- [ ] 每个 Theme 有 trend_direction（growing/stable/declining）
-- [ ] methodology_tags 和 open_questions 有意义
+### Phase B：工业信号轨道
 
-### P3d：方向综合 ⬜
-**依赖**：P3c
-**核心功能**：
-- CandidateDirection 模型 + CandidateDirectionRepository
-- DirectionSynthesisPipeline：综合 Themes + Profile + 反馈，输出 2-3 个候选方向
-- LLM PREMIUM tier，每周一次调用
-- prompt 模板：`prompts/build_candidate_direction.md`（填充现有空文件）
-- CLI 命令：`synthesize`
+**B1: 需求信号提取** ⬜
+- SignalExtractionPipeline（工业轨，博客 → 结构化需求信号）
+- prompts/extract_demand_signal.md
+- CLI `extract-signals`
 
-**验收标准**：
-- [ ] 生成 2-3 个候选方向，每个有 title / rationale / why_now / 评分 / 支撑论文
-- [ ] 方向与用户研究兴趣（web fuzzing / vulnerability detection）高度相关
+**B2: 分轨评分** ⬜
+- TrackRouter（按 source_tier 分流）
+- CompositeStrategy 分轨权重
+- 学术轨：domain_relevance×0.5 + recency×0.3 + authority×0.2
+- 工业轨：recency×0.5 + domain_relevance×0.4 + authority×0.1
 
-### P3e：Landscape 报告 + 方向/主题反馈 ⬜
-**依赖**：P3d
-**核心功能**：
-- LandscapeReportGenerator（替换 WeeklyReportGenerator）
-- 报告结构：研究前沿地图 + 趋势洞察 + 候选方向 + 推荐阅读 + 博客回顾
-- feedback CLI 扩展：`--theme-id` / `--direction-id`
-- `run --full` 串联智能分析全链路
+### Phase C：空白检测（核心产出）
 
-**验收标准**：
-- [ ] Landscape 报告包含所有 section，内容有意义
-- [ ] 反馈命令支持对 Theme 和 Direction 操作
-- [ ] `run --full` 完整运行不报错
+**C1: 空白检测** ⬜
+- ResearchGap 模型 + Repository
+- GapDetectionPipeline（统计交叉比对 + 可选 LLM 验证）
+- CLI `detect-gaps`
 
-### P3f：Profile 信号提取 ⬜
-**依赖**：P3e（需要反馈数据）
-**核心功能**：
-- ProfileSignalPipeline：从反馈历史提取偏好模式
-- 更新 Profile.feedback_patterns
-- prompt 模板：`prompts/extract_profile_signals.md`（填充现有空文件）
+**C2: 方向综合改造** ⬜
+- CandidateDirection 模型 + Repository
+- DirectionSynthesisPipeline（基于 ResearchGap + Profile.direction_preferences）
+- CLI `synthesize`
 
-**验收标准**：
-- [ ] feedback_patterns 反映用户反馈趋势
-- [ ] 方向综合 prompt 能利用 feedback_patterns 提升推荐质量
+**C3: Landscape 报告** ⬜
+- LandscapeReportGenerator（含空白分析 section）
+- `run --full` 串联全流程
+- theme/direction 反馈 CLI
+
+### Phase D：趋势 + 反馈
+
+**D1: 统计趋势分析** ⬜
+- TrendAnalysisPipeline（定量统计 + 可选定性 LLM）
+- arXiv 新关键词涌现检测
+
+**D2: 反馈闭环** ⬜
+- ProfileSignalPipeline
 
 ---
 
-## 一个月内能完成什么？
+## 优先级排序（2026-03-16 更新）
 
-### 当前优先级排序（2026-03-13 更新）
-
-1. **Phase 3 智能分析层**（P3a → P3b → P3c → P3d → P3e → P3f）— 这是系统真正产生价值的核心
-2. **Phase 2 数据质量**（S&P TLS 修复、CCS abstract 补抓）— 提升 L2 分析和聚类质量
-3. **Phase 2b/2c**（Advisory 爬虫、调度器）— 降低优先级，等智能分析层就绪后再考虑
+1. **Phase A 基础改造**（SourceTier + Profile V2 + arXiv）— 为双轨架构打基础
+2. **Phase B 工业信号轨道**（需求信号提取 + 分轨评分）— 建立工业轨
+3. **Phase C 空白检测**（核心创新：学术覆盖 vs 工业需求 的交叉比对）
+4. **Phase D 趋势 + 反馈**
+5. **Phase 2 数据质量**（S&P TLS、CCS abstract）— 降优
 
 ### 指导原则
-- **纵向深化 > 横向扩展**：先把现有 ~200 篇高相关论文的分析做透，再考虑加新数据源
-- **核心输出优先**：候选研究方向是系统的最终产物，所有工作围绕这个目标
-- **增量验证**：每完成一个阶段就验证输出质量，不要等全部完成再看效果
+- **发现未知 > 过滤已知**：Profile 放宽，让系统帮用户发现不知道自己会感兴趣的方向
+- **分轨处理 > 拍平排序**：不同来源有不同作用，不应混排
+- **统计信号 > 纯 LLM 推理**：空白检测用统计方法，对 Haiku 质量有天然容错
+- **增量验证**：A 完成就能看到放宽后的效果，B 完成能看到需求信号，C 完成才是完整产出
 
 ---
 

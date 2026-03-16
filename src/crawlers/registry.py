@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from src.crawlers.base import BlogCrawler, PaperCrawler
+from src.crawlers.arxiv_crawler import ArxivCrawler
 from src.crawlers.ccs_crawler import CCSCrawler
 from src.crawlers.cloudflare_blog_crawler import CloudflareSecurityCrawler
 from src.crawlers.ndss_crawler import NDSSCrawler
@@ -18,6 +19,7 @@ PAPER_CRAWLER_REGISTRY: dict[str, type[PaperCrawler]] = {
     "sp": SPCrawler,
     "ccs": CCSCrawler,
     "usenix-security": USENIXSecurityCrawler,
+    "arxiv": ArxivCrawler,
 }
 
 BLOG_CRAWLER_REGISTRY: dict[str, type[BlogCrawler]] = {
