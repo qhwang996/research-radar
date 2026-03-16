@@ -146,7 +146,7 @@ class BaseReportGenerator(ABC):
             1
             for artifact in artifacts
             if getattr(artifact.source_type, "value", str(artifact.source_type)) == "papers"
-            and artifact.source_tier == "top-tier"
+            and artifact.source_tier in {"top-tier", "t1-conference"}
         )
         return {
             "papers": counts.get("papers", 0),
