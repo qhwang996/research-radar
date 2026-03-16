@@ -114,6 +114,7 @@ from src.cli.process import (  # noqa: E402
     run_command,
     score_command,
     synthesize_command,
+    trend_command,
 )
 from src.cli.report import report_command  # noqa: E402
 
@@ -126,6 +127,7 @@ cli.add_command(deep_analyze_command)
 cli.add_command(cluster_command)
 cli.add_command(extract_signals_command)
 cli.add_command(detect_gaps_command)
+cli.add_command(trend_command)
 cli.add_command(synthesize_command)
 cli.add_command(score_command)
 cli.add_command(migrate_tiers_command)

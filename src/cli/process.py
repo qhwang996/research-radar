@@ -19,6 +19,7 @@ from src.pipelines.llm_relevance import LLMRelevancePipeline
 from src.pipelines.normalization import NormalizationPipeline, _LEGACY_TIER_MAP
 from src.pipelines.signal_extraction import SignalExtractionPipeline
 from src.pipelines.direction_synthesis import DirectionSynthesisPipeline
+from src.pipelines.trend_analysis import TrendAnalysisPipeline
 from src.reporting.daily import DailyReportGenerator
 from src.reporting.landscape import LandscapeReportGenerator
 from src.reporting.weekly import WeeklyReportGenerator
@@ -246,6 +247,13 @@ def run_command(
         ).process(None)
         click.echo(f"Clustered {len(themes)} themes")
 
+        # Trend analysis
+        trend_themes = TrendAnalysisPipeline(
+            session_factory=app.session_factory,
+            llm_client=llm_client,
+        ).process(None)
+        click.echo(f"Trend analysis updated {len(trend_themes)} themes")
+
         # Cross-reference: gap detection + direction synthesis
         gaps = GapDetectionPipeline(
             session_factory=app.session_factory,
@@ -342,6 +350,32 @@ def detect_gaps_command(app: AppContext, top_n: int) -> None:
     click.echo(f"Detected {len(gaps)} research gaps")
     for gap in gaps[:5]:
         click.echo(f"  [{gap.gap_score:.2f}] {gap.topic} (demand={gap.demand_frequency}, coverage={gap.academic_coverage:.1%})")
+
+
+@click.command("trend")
+@click.option(
+    "--provider",
+    type=click.Choice(["openai", "anthropic", "gemini"], case_sensitive=False),
+    default="anthropic",
+    show_default=True,
+    help="LLM provider for qualitative trend analysis.",
+)
+@click.option("--theme-id", type=str, default=None, help="Target a specific theme by UUID.")
+@click.option("--no-qualitative", is_flag=True, help="Skip LLM qualitative analysis, only compute statistics.")
+@pass_app_context
+@handle_command_errors
+def trend_command(app: AppContext, provider: str, theme_id: str | None, no_qualitative: bool) -> None:
+    """Compute trend statistics and qualitative analysis for research themes."""
+
+    llm_client = build_llm_client(provider)
+    themes = TrendAnalysisPipeline(
+        session_factory=app.session_factory,
+        llm_client=llm_client,
+        qualitative=not no_qualitative,
+    ).process(theme_id)
+    click.echo(f"Trend analysis updated {len(themes)} themes")
+    for t in themes[:10]:
+        click.echo(f"  [{t.trend_direction or '?'}] {t.name} ({t.artifact_count} papers)")
 
 
 @click.command("synthesize")
