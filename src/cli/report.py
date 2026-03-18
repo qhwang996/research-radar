@@ -6,6 +6,7 @@ import click
 
 from src.cli.main import AppContext, handle_command_errors, parse_date_option, pass_app_context
 from src.reporting.daily import DailyReportGenerator
+from src.reporting.landscape import LandscapeReportGenerator
 from src.reporting.weekly import WeeklyReportGenerator
 
 
@@ -13,7 +14,7 @@ from src.reporting.weekly import WeeklyReportGenerator
 @click.option(
     "--type",
     "report_type",
-    type=click.Choice(["daily", "weekly"], case_sensitive=False),
+    type=click.Choice(["daily", "weekly", "landscape"], case_sensitive=False),
     required=True,
     help="Report type to generate.",
 )
@@ -21,12 +22,14 @@ from src.reporting.weekly import WeeklyReportGenerator
 @pass_app_context
 @handle_command_errors
 def report_command(app: AppContext, report_type: str, target_date_raw: str | None) -> None:
-    """Generate a daily or weekly report."""
+    """Generate a daily, weekly, or landscape report."""
 
     target_date = parse_date_option(target_date_raw)
     normalized_type = report_type.lower()
     if normalized_type == "daily":
         output_path = DailyReportGenerator(session_factory=app.session_factory).generate(target_date)
+    elif normalized_type == "landscape":
+        output_path = LandscapeReportGenerator(session_factory=app.session_factory).generate(target_date)
     else:
         output_path = WeeklyReportGenerator(session_factory=app.session_factory).generate(target_date)
 

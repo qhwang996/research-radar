@@ -317,7 +317,8 @@ class CommandCliTestCase(unittest.TestCase):
 
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertIn("Clustered 1 themes", result.output)
-        self.assertEqual(len(stub_llm.calls), 2)
+        # With <= 15 unique labels, merge is skipped: only 1 batch call
+        self.assertEqual(len(stub_llm.calls), 1)
 
         session = self.session_factory()
         try:

@@ -133,13 +133,13 @@ class ClusteringPipelineTestCase(unittest.TestCase):
         themes = pipeline.process(None)
 
         self.assertEqual(len(themes), 2)
-        self.assertEqual(themes[0].name, "Web Application Fuzzing")
+        self.assertEqual(themes[0].name, "Web Fuzzing")
         self.assertEqual(themes[0].artifact_ids, [papers[0].id, papers[1].id, papers[2].id])
         self.assertEqual(themes[1].artifact_ids, [papers[3].id, papers[4].id])
-        self.assertEqual(len(llm_client.calls), 2)
+        # With <= 15 unique labels, merge is skipped, only 1 LLM call (batch)
+        self.assertEqual(len(llm_client.calls), 1)
         self.assertEqual(llm_client.calls[0]["model_tier"], ModelTier.STANDARD)
-        self.assertEqual(llm_client.calls[0]["max_tokens"], 2000)
-        self.assertEqual(llm_client.calls[1]["max_tokens"], 1500)
+        self.assertEqual(llm_client.calls[0]["max_tokens"], 4000)
 
     def test_clustering_skips_low_relevance(self) -> None:
         """Low-relevance papers should not enter the clustering input."""
@@ -297,10 +297,14 @@ class ClusteringPipelineTestCase(unittest.TestCase):
 
         themes = pipeline.process(None)
 
-        self.assertEqual(len(themes), 1)
-        self.assertEqual(themes[0].name, "Web/Browser Fuzzing")
-        self.assertEqual(themes[0].artifact_ids, [paper.id for paper in papers])
-        self.assertEqual(len(llm_client.calls), 3)
+        # With <= 15 unique labels, LLM merge is skipped.
+        # Two distinct batch labels become two themes.
+        self.assertEqual(len(themes), 2)
+        theme_names = {t.name for t in themes}
+        self.assertIn("Web Fuzzing", theme_names)
+        self.assertIn("Browser Fuzzing", theme_names)
+        # Only 2 batch calls, no merge call
+        self.assertEqual(len(llm_client.calls), 2)
 
     def test_full_recluster_preserves_core(self) -> None:
         """Full reclustering should not delete pre-existing core themes."""

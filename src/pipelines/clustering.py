@@ -296,7 +296,7 @@ class ClusteringPipeline(BasePipeline):
             response_text = self.llm_client.generate(
                 prompt,
                 model_tier=ModelTier.STANDARD,
-                max_tokens=2000,
+                max_tokens=4000,
                 temperature=0.3,
                 cache_key=cache_key,
             )
@@ -304,21 +304,68 @@ class ClusteringPipeline(BasePipeline):
         return raw_clusters
 
     def _merge_clusters(self, raw_clusters: list[BatchCluster]) -> list[MergeCluster]:
-        """Merge semantically similar raw clusters into final themes."""
+        """Merge semantically similar raw clusters into final themes.
+
+        When there are many batch clusters, first deduplicate by label, then
+        send only unique labels to the LLM merge step.
+        """
 
         if not raw_clusters:
             return []
 
-        prompt = MERGE_PROMPT_TEMPLATE.replace("{{cluster_list}}", self._build_cluster_list(raw_clusters))
-        cache_key = f"cluster_merge_{self.cluster_version}_{self._hash_strings([cluster.cluster_label for cluster in raw_clusters])}"
-        response_text = self.llm_client.generate(
-            prompt,
-            model_tier=ModelTier.STANDARD,
-            max_tokens=1500,
-            temperature=0.2,
-            cache_key=cache_key,
-        )
-        return self._parse_merge_clusters(response_text)
+        # Deduplicate: group by normalized label, keep the richest description
+        label_groups: dict[str, BatchCluster] = {}
+        for cluster in raw_clusters:
+            norm_label = cluster.cluster_label.strip().lower()
+            existing = label_groups.get(norm_label)
+            if existing is None or len(cluster.description or "") > len(existing.description or ""):
+                label_groups[norm_label] = cluster
+
+        unique_clusters = list(label_groups.values())
+        logger.info("Merge: %s raw clusters deduplicated to %s unique labels", len(raw_clusters), len(unique_clusters))
+
+        # If few enough unique labels, skip LLM merge
+        if len(unique_clusters) <= 15:
+            return [
+                MergeCluster(
+                    final_label=c.cluster_label,
+                    description=c.description,
+                    merged_from=[c.cluster_label],
+                    keywords=c.keywords,
+                )
+                for c in unique_clusters
+            ]
+
+        # For large numbers, chunk unique clusters and merge in rounds
+        chunk_size = 40
+        all_merged: list[MergeCluster] = []
+        chunks = [unique_clusters[i:i + chunk_size] for i in range(0, len(unique_clusters), chunk_size)]
+
+        for chunk_idx, chunk in enumerate(chunks):
+            prompt = MERGE_PROMPT_TEMPLATE.replace("{{cluster_list}}", self._build_cluster_list(chunk))
+            cache_key = f"cluster_merge_{self.cluster_version}_{chunk_idx}_{self._hash_strings([c.cluster_label for c in chunk])}"
+            try:
+                response_text = self.llm_client.generate(
+                    prompt,
+                    model_tier=ModelTier.STANDARD,
+                    max_tokens=4000,
+                    temperature=0.2,
+                    cache_key=cache_key,
+                )
+                all_merged.extend(self._parse_merge_clusters(response_text))
+            except Exception as exc:
+                logger.warning("Merge chunk %s failed, using raw labels: %s", chunk_idx, exc)
+                for c in chunk:
+                    all_merged.append(
+                        MergeCluster(
+                            final_label=c.cluster_label,
+                            description=c.description,
+                            merged_from=[c.cluster_label],
+                            keywords=c.keywords,
+                        )
+                    )
+
+        return all_merged
 
     def _build_theme_drafts(
         self,

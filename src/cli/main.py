@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from src.db.session import create_all_tables, create_database_engine, create_session_factory, get_database_url
 
-load_dotenv()
+load_dotenv(override=True)
 
 logger = logging.getLogger(__name__)
 
