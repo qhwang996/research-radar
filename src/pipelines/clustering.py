@@ -306,14 +306,16 @@ class ClusteringPipeline(BasePipeline):
     def _merge_clusters(self, raw_clusters: list[BatchCluster]) -> list[MergeCluster]:
         """Merge semantically similar raw clusters into final themes.
 
-        When there are many batch clusters, first deduplicate by label, then
-        send only unique labels to the LLM merge step.
+        Strategy for large corpora:
+        1. Deduplicate by normalized label
+        2. If <= 25 unique labels, return as-is (no LLM needed)
+        3. Otherwise, chunk merge → then global re-merge until <= 25 themes
         """
 
         if not raw_clusters:
             return []
 
-        # Deduplicate: group by normalized label, keep the richest description
+        # Step 1: Deduplicate by normalized label
         label_groups: dict[str, BatchCluster] = {}
         for cluster in raw_clusters:
             norm_label = cluster.cluster_label.strip().lower()
@@ -324,8 +326,8 @@ class ClusteringPipeline(BasePipeline):
         unique_clusters = list(label_groups.values())
         logger.info("Merge: %s raw clusters deduplicated to %s unique labels", len(raw_clusters), len(unique_clusters))
 
-        # If few enough unique labels, skip LLM merge
-        if len(unique_clusters) <= 15:
+        # Step 2: If few enough, skip LLM merge
+        if len(unique_clusters) <= 25:
             return [
                 MergeCluster(
                     final_label=c.cluster_label,
@@ -336,14 +338,43 @@ class ClusteringPipeline(BasePipeline):
                 for c in unique_clusters
             ]
 
-        # For large numbers, chunk unique clusters and merge in rounds
-        chunk_size = 40
+        # Step 3: Iterative merge rounds until <= 25 themes
+        current = [
+            MergeCluster(
+                final_label=c.cluster_label,
+                description=c.description,
+                merged_from=[c.cluster_label],
+                keywords=c.keywords,
+            )
+            for c in unique_clusters
+        ]
+
+        max_rounds = 3
+        for round_idx in range(max_rounds):
+            if len(current) <= 25:
+                break
+            logger.info("Merge round %s: %s clusters to merge", round_idx + 1, len(current))
+            current = self._run_merge_round(current, round_idx)
+
+        logger.info("Merge complete: %s final themes", len(current))
+        return current
+
+    def _run_merge_round(self, clusters: list[MergeCluster], round_idx: int) -> list[MergeCluster]:
+        """Run one round of chunked LLM merging."""
+
+        # Build lightweight cluster list for merge prompt (label + description only)
+        chunk_size = 50
+        chunks = [clusters[i:i + chunk_size] for i in range(0, len(clusters), chunk_size)]
         all_merged: list[MergeCluster] = []
-        chunks = [unique_clusters[i:i + chunk_size] for i in range(0, len(unique_clusters), chunk_size)]
 
         for chunk_idx, chunk in enumerate(chunks):
-            prompt = MERGE_PROMPT_TEMPLATE.replace("{{cluster_list}}", self._build_cluster_list(chunk))
-            cache_key = f"cluster_merge_{self.cluster_version}_{chunk_idx}_{self._hash_strings([c.cluster_label for c in chunk])}"
+            cluster_text = "\n".join(
+                f"- 标签: {c.final_label}\n  描述: {c.description or 'N/A'}\n  关键词: {', '.join(c.keywords) if c.keywords else 'N/A'}"
+                for c in chunk
+            )
+            prompt = MERGE_PROMPT_TEMPLATE.replace("{{cluster_list}}", cluster_text)
+            cache_key = f"cluster_merge_{self.cluster_version}_r{round_idx}_c{chunk_idx}_{self._hash_strings([c.final_label for c in chunk])}"
+
             try:
                 response_text = self.llm_client.generate(
                     prompt,
@@ -352,18 +383,22 @@ class ClusteringPipeline(BasePipeline):
                     temperature=0.2,
                     cache_key=cache_key,
                 )
-                all_merged.extend(self._parse_merge_clusters(response_text))
+                parsed = self._parse_merge_clusters(response_text)
+                # Carry over merged_from history
+                for p in parsed:
+                    expanded_from: list[str] = []
+                    for label in p.merged_from:
+                        for c in chunk:
+                            if c.final_label.lower().strip() == label.lower().strip():
+                                expanded_from.extend(c.merged_from)
+                                break
+                        else:
+                            expanded_from.append(label)
+                    p.merged_from = expanded_from
+                all_merged.extend(parsed)
             except Exception as exc:
-                logger.warning("Merge chunk %s failed, using raw labels: %s", chunk_idx, exc)
-                for c in chunk:
-                    all_merged.append(
-                        MergeCluster(
-                            final_label=c.cluster_label,
-                            description=c.description,
-                            merged_from=[c.cluster_label],
-                            keywords=c.keywords,
-                        )
-                    )
+                logger.warning("Merge round %s chunk %s failed: %s", round_idx, chunk_idx, exc)
+                all_merged.extend(chunk)
 
         return all_merged
 
