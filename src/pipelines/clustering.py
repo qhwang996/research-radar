@@ -137,7 +137,7 @@ class ClusteringPipeline(BasePipeline):
         session_factory: sessionmaker[Session] | None = None,
         llm_client: LLMClient | Any | None = None,
         prompt_template_path: Path | None = None,
-        cluster_version: str = "v1",
+        cluster_version: str = "v2",
         min_relevance: float = 0.6,
         batch_size: int = 35,
     ) -> None:
@@ -296,7 +296,7 @@ class ClusteringPipeline(BasePipeline):
             response_text = self.llm_client.generate(
                 prompt,
                 model_tier=ModelTier.STANDARD,
-                max_tokens=4000,
+                max_tokens=6000,
                 temperature=0.3,
                 cache_key=cache_key,
             )
@@ -363,7 +363,7 @@ class ClusteringPipeline(BasePipeline):
         """Run one round of chunked LLM merging."""
 
         # Build lightweight cluster list for merge prompt (label + description only)
-        chunk_size = 50
+        chunk_size = 20
         chunks = [clusters[i:i + chunk_size] for i in range(0, len(clusters), chunk_size)]
         all_merged: list[MergeCluster] = []
 
@@ -379,7 +379,7 @@ class ClusteringPipeline(BasePipeline):
                 response_text = self.llm_client.generate(
                     prompt,
                     model_tier=ModelTier.STANDARD,
-                    max_tokens=4000,
+                    max_tokens=6000,
                     temperature=0.2,
                     cache_key=cache_key,
                 )
