@@ -1,7 +1,8 @@
-"""Pipeline for synthesizing candidate research directions from detected gaps."""
+"""Pipeline for synthesizing candidate research directions from multiple signal sources."""
 
 from __future__ import annotations
 
+from collections import Counter
 from datetime import date
 import json
 import logging
@@ -16,28 +17,31 @@ from src.exceptions import PipelineError
 from src.llm import LLMClient, ModelTier
 from src.models.candidate_direction import CandidateDirection
 from src.models.enums import DirectionStatus
+from src.models.profile import Profile
 from src.models.research_gap import ResearchGap
 from src.models.theme import Theme
 from src.pipelines.base import BasePipeline
 from src.repositories.candidate_direction_repository import CandidateDirectionRepository
+from src.repositories.profile_repository import ProfileRepository
 from src.repositories.research_gap_repository import ResearchGapRepository
 from src.repositories.theme_repository import ThemeRepository
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_PROMPT_TEMPLATE = """基于以下研究空白，推荐 2-3 个候选研究方向。
+DEFAULT_PROMPT_TEMPLATE = """基于以下信号推荐 3-5 个候选研究方向。
 
-空白：
-{{gaps}}
+用户背景：{{research_area}}，核心能力：{{interests}}
 
-主题：
-{{themes}}
+空白：{{gaps}}
+学术开放问题：{{academic_open_questions}}
+趋势：{{trend_signals}}
+主题：{{themes}}
 
 请返回 JSON 数组。"""
 
 
 class DirectionSynthesisPipeline(BasePipeline):
-    """Synthesize candidate research directions from detected gaps."""
+    """Synthesize candidate research directions from multiple signal sources."""
 
     def __init__(
         self,
@@ -55,7 +59,7 @@ class DirectionSynthesisPipeline(BasePipeline):
         self.direction_version = direction_version
 
     def process(self, input_data: Any = None) -> list[CandidateDirection]:
-        """Synthesize directions from active gaps and persist."""
+        """Synthesize directions from gaps, academic open questions, and trends."""
 
         if not self.validate_input(input_data):
             raise PipelineError("Invalid input for direction synthesis pipeline")
@@ -64,15 +68,21 @@ class DirectionSynthesisPipeline(BasePipeline):
         try:
             gap_repo = ResearchGapRepository(session)
             theme_repo = ThemeRepository(session)
+            profile_repo = ProfileRepository(session)
 
             gaps = gap_repo.list_active()
-            if not gaps:
-                logger.info("Direction synthesis skipped: no active gaps")
+            themes = theme_repo.list_active_or_core()
+            profile = profile_repo.get_latest_active() or profile_repo.get_latest()
+
+            # At least one signal source needed
+            if not gaps and not themes:
+                logger.info("Direction synthesis skipped: no gaps or themes")
                 return []
 
-            themes = theme_repo.list_active_or_core()
             template = self._load_prompt_template()
-            prompt = self._build_prompt(template, gaps, themes)
+            academic_oqs = self._extract_academic_open_questions(themes)
+            trend_signals = self._build_trend_signals(themes)
+            prompt = self._build_prompt(template, gaps, themes, profile, academic_oqs, trend_signals)
 
             response_text = self.llm_client.generate(
                 prompt,
@@ -94,11 +104,25 @@ class DirectionSynthesisPipeline(BasePipeline):
 
             saved: list[CandidateDirection] = []
             gap_map = {g.topic.lower().strip(): g for g in gaps}
+            theme_map = {t.name.lower().strip(): t for t in themes}
 
             for d in directions_data:
-                # Link to gap
-                gap_topic = (d.get("gap_topic") or "").lower().strip()
+                # Try to link to gap
+                gap_topic = (d.get("gap_topic") or d.get("signal_source") or "").lower().strip()
                 matching_gap = gap_map.get(gap_topic)
+
+                # Try to link to theme
+                related_theme_name = (d.get("related_theme") or "").lower().strip()
+                matching_theme = theme_map.get(related_theme_name)
+
+                related_theme_ids = []
+                supporting_ids = []
+                if matching_gap:
+                    related_theme_ids = matching_gap.related_theme_ids
+                    supporting_ids = matching_gap.related_artifact_ids
+                elif matching_theme:
+                    related_theme_ids = [matching_theme.theme_id]
+                    supporting_ids = (matching_theme.artifact_ids or [])[:10]
 
                 direction = CandidateDirection(
                     title=d.get("title", "Untitled"),
@@ -107,8 +131,8 @@ class DirectionSynthesisPipeline(BasePipeline):
                     why_now=d.get("why_now"),
                     gap_id=matching_gap.gap_id if matching_gap else None,
                     gap_score=matching_gap.gap_score if matching_gap else None,
-                    related_theme_ids=matching_gap.related_theme_ids if matching_gap else [],
-                    supporting_artifact_ids=matching_gap.related_artifact_ids if matching_gap else [],
+                    related_theme_ids=related_theme_ids,
+                    supporting_artifact_ids=supporting_ids,
                     key_papers=[],
                     open_questions=d.get("open_questions", []),
                     novelty_score=self._normalize_score(d.get("novelty_score")),
@@ -122,7 +146,10 @@ class DirectionSynthesisPipeline(BasePipeline):
                 )
                 saved.append(dir_repo.save(direction))
 
-            logger.info("Direction synthesis complete: %s directions from %s gaps", len(saved), len(gaps))
+            logger.info(
+                "Direction synthesis complete: %s directions from %s gaps + %s themes",
+                len(saved), len(gaps), len(themes),
+            )
             return saved
         finally:
             session.close()
@@ -132,6 +159,59 @@ class DirectionSynthesisPipeline(BasePipeline):
 
     def validate_output(self, data: Any) -> bool:
         return isinstance(data, list)
+
+    def _extract_academic_open_questions(self, themes: list[Theme]) -> str:
+        """Extract and aggregate open questions from themes as academic-internal gaps."""
+
+        oq_counter: Counter[str] = Counter()
+        oq_themes: dict[str, list[str]] = {}
+
+        for theme in themes:
+            for oq in (theme.open_questions or []):
+                normalized = oq.strip()
+                if not normalized:
+                    continue
+                oq_counter[normalized] += 1
+                oq_themes.setdefault(normalized, []).append(theme.name)
+
+        if not oq_counter:
+            return "暂无学术内部开放问题数据。"
+
+        # Sort by frequency (cross-theme questions are more significant)
+        lines = []
+        for oq, count in oq_counter.most_common(15):
+            theme_names = ", ".join(oq_themes[oq][:3])
+            lines.append(f"- [{count}个主题] {oq} (来自: {theme_names})")
+        return "\n".join(lines)
+
+    def _build_trend_signals(self, themes: list[Theme]) -> str:
+        """Build trend + competition signals from themes."""
+
+        lines = []
+
+        growing = [t for t in themes if t.trend_direction == "growing"]
+        declining = [t for t in themes if t.trend_direction == "declining"]
+        stable_with_oqs = [
+            t for t in themes
+            if t.trend_direction in ("stable", None) and (t.open_questions or [])
+        ]
+
+        if growing:
+            lines.append("上升趋势（竞争可能加剧）：")
+            for t in sorted(growing, key=lambda x: x.artifact_count, reverse=True)[:5]:
+                lines.append(f"  - {t.name} ({t.artifact_count} papers, ▲)")
+
+        if declining:
+            lines.append("下降趋势（可能有被忽视的机会）：")
+            for t in sorted(declining, key=lambda x: x.artifact_count, reverse=True)[:5]:
+                lines.append(f"  - {t.name} ({t.artifact_count} papers, ▼)")
+
+        if stable_with_oqs:
+            lines.append("稳定但有未解决问题（低竞争机会）：")
+            for t in sorted(stable_with_oqs, key=lambda x: len(x.open_questions or []), reverse=True)[:5]:
+                lines.append(f"  - {t.name} ({t.artifact_count} papers, 开放问题: {len(t.open_questions or [])})")
+
+        return "\n".join(lines) if lines else "暂无趋势数据。"
 
     def _load_prompt_template(self) -> str:
         """Load prompt template from disk or use default."""
@@ -147,22 +227,41 @@ class DirectionSynthesisPipeline(BasePipeline):
         template: str,
         gaps: list[ResearchGap],
         themes: list[Theme],
+        profile: Profile | None,
+        academic_oqs: str,
+        trend_signals: str,
     ) -> str:
-        """Render the synthesis prompt."""
+        """Render the synthesis prompt with all signal sources."""
 
         gaps_text = "\n\n".join(
-            f"### 空白: {g.topic} (gap_score={g.gap_score:.2f}, demand={g.demand_frequency})\n"
-            f"描述: {g.description or 'N/A'}\n"
-            f"学术覆盖: {g.academic_coverage:.0%}"
+            f"- {g.topic} (gap_score={g.gap_score:.2f}, demand={g.demand_frequency}, "
+            f"coverage={g.academic_coverage:.0%}): {g.description or 'N/A'}"
             for g in gaps[:10]
-        )
+        ) if gaps else "暂无工业-学术空白数据。"
 
         themes_text = "\n".join(
-            f"- {t.name}: {t.description or 'N/A'} (trend: {t.trend_direction or 'unknown'}, papers: {t.artifact_count})"
-            for t in themes[:15]
+            f"- {t.name} (trend: {t.trend_direction or '?'}, {t.artifact_count} papers)"
+            for t in sorted(themes, key=lambda x: x.artifact_count, reverse=True)[:20]
         )
 
-        prompt = template.replace("{{gaps}}", gaps_text)
+        # Profile fields
+        research_area = "Unknown"
+        interests_str = "None"
+        prefs_str = "None"
+        if profile:
+            research_area = profile.current_research_area or "Unknown"
+            interests_str = ", ".join(profile.interests or [])
+            prefs = profile.direction_preferences or {}
+            if prefs:
+                prefs_str = ", ".join(f"{k}={v}" for k, v in prefs.items())
+
+        prompt = template
+        prompt = prompt.replace("{{research_area}}", research_area)
+        prompt = prompt.replace("{{interests}}", interests_str)
+        prompt = prompt.replace("{{direction_preferences}}", prefs_str)
+        prompt = prompt.replace("{{gaps}}", gaps_text)
+        prompt = prompt.replace("{{academic_open_questions}}", academic_oqs)
+        prompt = prompt.replace("{{trend_signals}}", trend_signals)
         prompt = prompt.replace("{{themes}}", themes_text)
         return prompt
 
