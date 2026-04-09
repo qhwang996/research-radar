@@ -1,5 +1,9 @@
 # Implementation Guide
 
+> 历史工程实现参考文档。
+> 它不是当前唯一入口，也不是 live roadmap。
+> 当前状态请看 `docs/CURRENT_STATUS.md`，当前连续开发请看 `docs/CODEX_BACKLOG.md`。
+
 本文档为代码实现提供具体指导，包括接口定义、编码规范、测试要求等。
 
 ---
